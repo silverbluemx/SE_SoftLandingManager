@@ -15,7 +15,7 @@ If you're not using both of these, then the script won't work well but also is n
 ## Functions:
 - computes and follows an optimal vertical speed profile for the descent
 - prioritizes electric thrusters (atmospheric and ion) before using hydrogen ones
-- uses a radar (raycasts from a downward facing camera) to measure your altitude way above 	what the game normally provides (useful for planets with gravity extending more than 100km from them!)
+- uses a radar (raycasts from a downward facing camera) to measure your altitude way above what the game normally provides (useful for planets with gravity extending more than 100km from them!)
 - computes the maximum lift that your ship is capable of (both in vacuum and ideal atmosphere)
 - provides an estimate of the surface gravity for the planet
 - warns if the ship is not capable of landing on the planet
@@ -50,7 +50,42 @@ If you're not using both of these, then the script won't work well but also is n
 - earth, mars, moon etc. : optimize the script for the selected planet
 Can be combined, ex : mode1mars, mode2atmo, etc.
 
+## Ship configuration
+
+Use the following names for your ship blocks. They may be changed in the script configuration.
+
+*SLMref* OPTINAL BUT RECOMMANDED : Reference controller (seat, cockpit, etc.) to use for the ship orientation. This is optional, if the script doesnt find a controller with this name then it tries to find another suitable controller on the grid.
+
+*SLMradar* OPTIONAL BUT RECOMMANDED : Name of downward-facing camera used as a ground radar (to measure altitude from very long distance and also account for landing pads above or below a planet surface)
+
+*SLMignore* OPTIONAL : Include this tag in downward facing thruster (ie thrusters that lift the ship) that you want this script to ignore. For example, on an auxiliary drone.
+
+*SLMdisplay* OPTIONAL : Name of the main display for the script (there can be any number of them, or none at all)
+
+*SLMdebug* OPTIONAL : Additional debug display for the script (there can be any number of them, or none at all)
+
+*SLMgraph* OPTIONAL : Additional graphical display for the script (there can be any number of them, or none at all)
+
+*SLMlanding* OPTIONAL : Name of timer blocks that will be triggered a little before landing (ex : extend landing gear)
+
+*SLMliftoff* OPTIONAL : Name of timer blocks that will be triggered a little after liftoff landing (ex : retract landing gear)
+
+*SLMon* OPTIONAL : Name of timer blocks that will be triggered when the SLM activates (ex : by the command "mode1")
+
+*SLMoff* OPTIONAL : Name of timer blocks that will be triggered when the SLM disactivates (ex : by the command "off", or at landing)
+
+*SLMsound* OPTIONAL : Name of a sound block used to warn if expected surface gravity is higher than what the ship can handle or the ship is in panic mode (incapable of slowing down enough)
+
+## Script configuration
+
+Speed limits, thrust-to-weight ratio margins, PID controller coefficients, timer trigger altitude etc. can be changed in the *SLMConfiguration* class (see code).
+
+## Planet catalog
+
+All vanilla planets are included. Modded planets can be added to the *PlanetCatalog* class (see code).
+
 ## Technical info
+### Speed set-point
 The speed set-point is computed with 4 possible methods:
 
 |Altitude							|Landing Profile			|Method|
@@ -60,6 +95,52 @@ The speed set-point is computed with 4 possible methods:
 |available & below transition		|-							|constant final speed|
 |not available						|-							|back-up formula simply using the local gravity |
 
+### Liftoff Profile Builder
+
+- Initial conditions : 0 vertical speed, altitude=ship at the surface
+- Compute atmospheric density using the same simplified model as the game
+- Compute the ship maximum lift from ion and atmospheric thrusters considering that density
+- Compute the ship maximum lift from hydrogen thrusters
+- If necessary, limit the total thrust according to configured acceleration and TWR limits (cut back on hydrogen first)
+- Compute gravity using the same simplified model as the game
+- Compute ship vertical acceleration : thrust/weight - gravity
+- Compute ship vertical speed for some time step dt
+- Compute the new ship altitude for some time step dt
+- Repeat for 256 points
+
+Then we use the altitude/speed table to interpolate (using binary search and linear interpolation) the speed set-point for any altitude value.
+
+
+### Speed set-point explicit formula
+The formula for the speed set-point is derived assuming a time-reversed take-off with constant acceleration
+
+Newton formula : 
+mass * acceleration = forces, with forces = lift - weight
+
+Divide by mass:
+acceleration = lift/mass - gravity
+acceleration = (lift/weight - 1)*gravity
+
+If initial altitude and speed are zero, and we assume acceleration is constant:
+speed = acceleration * time;
+altitude = 1/2 * acceleration * time^2
+
+Then solve for time as a function of altitude
+time = sqrt(2*altitude/acceleration)
+		
+Substitude for time in the speed formula:
+speed = acceleration * sqrt(2*altitude/acceleration)
+speed = sqrt(2*altitude*acceleration)
+
+Finally :
+speed = sqrt(2*altitude*(lift/weight - 1)*gravity)
+
+Because gravity, lift and weight are not actually constant, this formula provides an approximation
+that is more and more incorrect at high altitude and thus margins must be applied here and there so
+that the ship is capable of following the changes in the set-point
+
+	
+### Altitude
 The script computes ship altitude (distance from surface) by combining altitude from controller (as shown on HUD) and radar (raytracing from ground-facing camera) as follows:
 
 |Altitude from controller	|		Altitude from radar		|	Method|
