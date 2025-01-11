@@ -4,6 +4,7 @@ Soft Landing Manager script for the game Space Engineers
 A script to automatically manage your thrusters to land safely on planets while optimizing your fuel and energy use.
 
 The new version uses an acceleration model of the ship, with a planet gravity and atmosphere model (as used by the game, not real-life !), to simulate a liftoff from the surface at max thrust, and plays that in reverse during landing. Some final tweaking may be needed but it works quite well at the moment and is better able to capture how ion and atmo thrusters capability evolve as the atmosphere density changes.
+This heavily relies on the planet gravity extending away to a long distance from the surface and following an inverse square law, which is not what the game natively does, hence why the mod Real Orbit is required (and a speed mod to make things even more interesting).
 
 ## Designed for use with:
 - inverse square law gravity mods such as Real Orbits
@@ -51,9 +52,20 @@ Can be combined, ex : mode1mars, mode2atmo, etc.
 
 ## Technical info
 The speed set-point is computed with 4 possible methods:
-|Altitude							|Landing Profile			|Method
-|------------------------------------|---------------------------|
-|available & above transition		|computed & valid			|detailed profile computed by the Liftoff Profile Builder
-|available & above transition		|not computed or not valid	|explicit formula assuming a time-reversed take-off with constant acceleration and gravity
-|available & below transition		|-							|constant final speed
-|not available						|-							|back-up formula simply using the local gravity 
+
+|Altitude							|Landing Profile			|Method|
+|------------------------------------|---------------------------|---|
+|available & above transition		|computed & valid			|detailed profile computed by the Liftoff Profile Builder|
+|available & above transition		|not computed or not valid	|explicit formula assuming a time-reversed take-off with constant acceleration and gravity|
+|available & below transition		|-							|constant final speed|
+|not available						|-							|back-up formula simply using the local gravity |
+
+The script computes ship altitude (distance from surface) by combining altitude from controller (as shown on HUD) and radar (raytracing from ground-facing camera) as follows:
+
+|Altitude from controller	|		Altitude from radar		|	Method|
+|---------------|--------------|-----------------------|
+|available & above transition		|-					|		Use altitude from surface
+|available & below transition		|available				|	Use radar altitude
+|available & below transition		|not available				|Use altitude from surface
+|not available				|	available			|		Use radar altitude
+|not available					|not available			|	default value (1e6)
