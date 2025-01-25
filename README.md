@@ -115,25 +115,33 @@ Then we use the altitude/speed table to interpolate (using binary search and lin
 The formula for the speed set-point is derived assuming a time-reversed take-off with constant acceleration
 
 Newton formula : 
-mass * acceleration = forces, with forces = lift - weight
+
+$mass * acceleration = forces$\
+$forces = lift - weight$\
+$weight = mass * gravity$
 
 Divide by mass:
-acceleration = lift/mass - gravity
-acceleration = (lift/weight - 1)*gravity
+
+$acceleration = \frac{lift}{mass} - gravity$\
+$acceleration = (\frac{lift}{weight} - 1)*gravity$
 
 If initial altitude and speed are zero, and we assume acceleration is constant:
-speed = acceleration * time;
-altitude = 1/2 * acceleration * time^2
+
+$speed = acceleration * time$\
+$altitude = 1/2 * acceleration * time^2$
 
 Then solve for time as a function of altitude
-time = sqrt(2*altitude/acceleration)
+
+$time = \sqrt{2 * \frac{altitude}{acceleration}}$
 		
 Substitude for time in the speed formula:
-speed = acceleration * sqrt(2*altitude/acceleration)
-speed = sqrt(2*altitude*acceleration)
+
+$speed = acceleration * \sqrt{2*\frac{altitude}{acceleration}}$\
+$speed = \sqrt{2 * altitude * acceleration}$
 
 Finally :
-speed = sqrt(2*altitude*(lift/weight - 1)*gravity)
+
+$speed = \sqrt{2 * altitude * (\frac{lift}{weight} - 1)*gravity}$
 
 Because gravity, lift and weight are not actually constant, this formula provides an approximation
 that is more and more incorrect at high altitude and thus margins must be applied here and there so
