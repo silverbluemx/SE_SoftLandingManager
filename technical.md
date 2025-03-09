@@ -90,24 +90,31 @@ Then we use the altitude/speed table to interpolate (using binary search and lin
 If gravity follows the inverse square law:
 
 This solves the equation :
+
 $grav * (radius+alt)² = $prev_grav * (radius+prev_alt)²
+
 for the unknown radius
 
 At each call, use the new updated values for the computations
 and then push them to the old values for the next update
 
 In the real world, gravity works as follows:
+
 $grav = \frac{C}{d^2}
+
 with C a constant
 d the distance to the center of the planet
 
 In Space Engineers (with the Real Orbits mod!) gravity works as follows:
 - below radius * planet.hillparam
-$g(alt_{sealevel}) = g_{sealevel} ;
+
+$g(alt_{sealevel}) = g_{sealevel}
 
 - above radius * planet.hillparam
+
 $g(alt_{sealevel}) = g_{sealevel}  * {(\frac{MaxRadius}{alt_{sealevel}+radius})}^2;
 
 with :
+
 $MaxRadius = radius  * (1  +  planet.hillparam)
 
