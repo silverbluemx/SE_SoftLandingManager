@@ -91,7 +91,7 @@ If gravity follows the inverse square law:
 
 This solves the equation :
 
-$grav * (radius+alt)² = $prev_grav * (radius+prev_alt)²$
+$grav * (radius+alt)^2 = prev_grav * (radius+prev_alt)^2$
 
 for the unknown radius
 
