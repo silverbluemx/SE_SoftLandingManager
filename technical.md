@@ -298,7 +298,7 @@ If the ship has a single radar, shared with altitude measurement, then only pair
 With dual radars, the script also begins with only pair 1 and 2 (`ScanMode.DoubleEarly`) but at a much higher altitude  (`DOUBLE_RADAR_INITIAL_SCAN_DISTANCE = 5000`).
 Once close enough to the ground (`DOUBLE_RADAR_WIDE_SCAN_DISTANCE = 1000`), it activates all other pairs and scans in a sequence 1, 2, 3, 4, 5, 6, 1, 2, 3 etc. (`ScanMode.DoubleWide`). That way, it is able to get a better view of the terrain slopes below the ship, and aim more accurately.
 
-![Diagram of the terrain scan pattern](Diagrams.png)
+![Diagram of the terrain scan pattern](img/scan_pattern.png)
 
 ## 7.6 Terrain scan angle
 
@@ -312,7 +312,7 @@ A maximum angle is applied, particularly to reduce the risk of the ray hitting t
 
 These limits are applied to all pairs, 1 to 6, so at very low altitudes, pairs 1 and 3 cast to the same angle, and pairs 2 and 4 also.
 
-![Diagram of the terrain scan angle](Diagrams2.png)
+![Diagram of the terrain scan angle](img/scan_angle.png)
 
 ## 7.7 Horizontal speed recommandation
 
