@@ -1,401 +1,366 @@
-﻿
-/*
+﻿/*
 -------------------------------------
 SOFT LANDING MANAGER by silverbluemx
 -------------------------------------
 
 A script to automatically manage your thrusters to land safely on planets while
-optimizing your fuel and energy use.
+optimizing your fuel and energy use. Also scans the terrain and guides the ship
+to a safe landing spot, avoiding obstacles and steep slopes.
 
-Version 1.0 - 2024-12-21 - 	First public release
-Version 1.1 - 2025-01-11 - 	Added pre-computation of landing profile from ship, atmosphere and gravity model
-							Added visualisatio of landing profile on a separate display
-							Added planet catalog to fine-tune the landing profile
+Version 2 - 2025-05-29 - Large update adding terrain avoidance, ship leveling, and more.
 
 Designed for use with:
 - inverse square law gravity mods such as Real Orbits
 - high speed limit mods such as 1000m/s speed mod
-If you're not using both of these, then the script won't work well but also is not really needed.
-- ships with not a lof of margin for vertical thrust (ex : lift to weight ratio of 1.5)
 
-Functions:
-- computes and follows an optimal vertical speed profile for the descent
-- prioritizes electric thrusters (atmospheric and ion) before using hydrogen ones
-- uses a radar (raycasts from a downward facing camera) to measure your altitude way above
-	what the game normally provides (useful for planets with gravity extending more than 100km from them!)
-- computes the maximum lift that your ship is capable of (both in vacuum and ideal atmosphere)
-- provides an estimate of the surface gravity for the planet
-- warns if the ship is not capable of landing on the planet
-- automatically deploy parachutes if about to crash
-
-Installation:
-- (optional but recommanded) install a downwards facing camera on your ship
-- install the script in a programmable block
-- (optional but recommanded) configure the names of the downward camera and ship controller (cockpit, helm etc.)
-- (optional) configure LDCs, timers, sound blocks etc. as needed, see below for the functions they provide
-- recompile the script to let it autoconfigure itself
-- (recommanded) Install and configure on your ship an auto-levelling script such as flight assist or other
-
-Usage:
-- Set your ship in the gravity field of a planet, properly leveled
-- Activate your auto-levelling script, or keep the ship level manually
-- Activate mode1 or mode2 to have the script manage your descent
-- (optionnally) Set vacuum or atmosphere mode, or select a planet to optimize the descent profile
-- Once landed, check if the script automatically switched to mode0 (off), if not turn it off yourself
-
-Command line arguments:
-- mode0 : turns the script off (the LCDs still give you information about your ship capabilities)
-- mode1 : activate a descent mode that prioritizes electric thrusters (atmospheric and ions)
-	It fires the ion thrusters early to bleed the gravitational potential energy and reduce the work
-	left for the hydrogen thrusters. However this uses more total electrical energy than mode2
-- mode2 : activate a faster descent mode that fires thrusters only when needed
-	It is possible to switch between mode1 and mode2 during the descent, for example use mode2 to
-	let the ship pick up speed, and then switch to mode1 to try and maintain that speed using ion thrusters
-- vacuum : tells the script to expect vacuum at the planet surface (atmo thrusters won't work, max ion efficiency)
-- atmo : tells the script to expect atmosphere at the planet surface (atmo thrusters will work, low ion efficiency)
-- unknown : tells the script that the surface atmosphere conditions are unknown (default setting)
-- earth, mars, moon etc. : optimize the script for the selected planet
-Can be combined, ex : mode1mars, mode2atmo, etc.
+See the Steam Workshop page and README.md and technical.md files on GitHub for more information :
+https://github.com/silverbluemx/SE_SoftLandingManager
 
 */
 
 // Settings
 
 /// <summary>
-/// Configuration class for the Soft Landing Manager script.
-/// Contains settings for various ship components and their tags.
-/// CONFIGURE HERE THE TAGS USED FOR SHIP BLOCKS
+/// Configure here the tags used for ship blocks.
 /// </summary>
 public class SLMShipConfiguration {
 
-	// OPTINAL BUT RECOMMANDED : Reference controller (seat, cockpit, etc.) to use for the ship orientation.
-	// This is optional, if the script doesnt find a controller with this name then it
-	// tries to find another suitable controller on the grid.
-	public readonly string ctrller_name =  "SLMref";
+	// RECOMMANDED : Reference controller (seat, cockpit, etc.) to use for the ship orientation.
+	public readonly string CTRLLER_NAME =  "SLMref";
 
-	// OPTIONAL BUT RECOMMANDED : Name of downward-facing camera used as a ground radar
-	// (to measure altitude from very long distance
-	// and also account for landing pads above or below a planet surface)
-	public readonly string radar_name =  "SLMradar";
+	// RECOMMANDED : Downward-facing camera (up to 2) used as a ground radar.
+	public readonly string RADAR_NAME =  "SLMradar";
 
-	// OPTIONAL : Include this tag in downward facing thruster (ie thrusters that lift the ship)
-	// that you want this script to ignore. For example, on an auxiliary drone.
-	public readonly string lifter_ignore_name = "SLMignore";
+	// OPTIONAL : Include this tag in blocks that you want this script to ignore. For example, on an auxiliary drone.
+	public readonly string IGNORE_NAME = "SLMignore";
 
-	// OPTIONAL : Name of the main display for the script (there can be any number of them, or none at all)
-	public readonly string lcd_name = "SLMdisplay";
+	// OPTIONAL : Main display for the script (any number of them, or none at all)
+	public readonly string LCD_NAME = "SLMdisplay";
 
-	// OPTIONAL : Additional debug display for the script (there can be any number of them, or none at all)
-	public readonly string debuglcd_name = "SLMdebug";
+	// OPTIONAL : Additional debug display for the script (any number of them, or none at all)
+	public readonly string DEBUGLCD_NAME = "SLMdebug";
 
-	// OPTIONAL : Additional graphical display for the script (there can be any number of them, or none at all)
-	public readonly string graphlcd_name = "SLMgraph";
+	// OPTIONAL : Timer blocks triggered a little before landing (ex : extend landing gear)
+	public readonly string LANDING_TIMER_NAME =  "SLMlanding";
 
-	// OPTIONAL : Name of timer blocks that will be triggered a little before landing (ex : extend landing gear)
-	public readonly string landing_timer_name =  "SLMlanding";
+	// OPTIONAL : Timer blocks triggered a little after liftoff landing (ex : retract landing gear)
+	public readonly string LIFTOFF_TIMER_NAME =  "SLMliftoff";
 
-	// OPTIONAL : Name of timer blocks that will be triggered a little after liftoff landing (ex : retract landing gear)
-	public readonly string liftoff_timer_name =  "SLMliftoff";
-	// OPTIONAL : Name of timer blocks that will be triggered when the SLM activates (ex : by the command "mode1")
-	public readonly string on_timer_name =  "SLMon";
-	// OPTIONAL : Name of timer blocks that will be triggered when the SLM disactivates (ex : by the command "off", or at landing)
-	public readonly string off_timer_name =  "SLMoff";
+	// OPTIONAL : Timer blocks triggered when the SLM activates (ex : by the command "mode1")
+	public readonly string ON_TIMER_NAME =  "SLMon";
 
-	// OPTIONAL : Name of a sound block used to warn if expected surface gravity is higher than what
-	// the ship can handle or the ship is in panic mode (incapable of slowing down enough)
-	public readonly string sound_name =  "SLMsound";
+	// OPTIONAL : Timer blocks triggered when the SLM disactivates (ex : by the command "off", or at landing)
+	public readonly string OFF_TIMER_NAME =  "SLMoff";
+
+	// OPTIONAL : Sound block used to warn of dangerous situations
+	public readonly string SOUND_NAME =  "SLMsound";
 	
 }
 
+/// <summary>
+/// Configure here many settings for how the script behaves.
+/// </summary>
 public class SLMConfiguration {
-
-	// SPEED/ALTITUDE PROFILE MODE
-
-	// False to always use the old descent profile formula (same as v1.0).
-	public readonly bool USE_PROFILE = true;
-	// True to recompute the profile only 1,6sec, to reduce the script performance impact. False to recompute the profile every 160ms.
-	public readonly bool SLOW_PROFILE_UPDATE = false;
 	
 	// ALTITUDE CORRECTION
 
 	// Offset to the altitude value (ex : if the ship reads altitude 5m when landed, set it to 5)
-	public readonly double altitude_offset = 0;
-	
+	public readonly double altitudeOffset = 0;
+	// Use this default value for the height of the ground above sea level
+	public readonly double defaultASLmeters = 500;
 
-	// PID CONTROLLER CONFIGURATION
-	public readonly float ai_max = 4;
-	public readonly float ai_min = -0.1f;
-	public readonly float kp = 0.05f;
-	public readonly float ki = 0.05f;
-	public readonly float kd = 10f;
-	public readonly float ad_filt=0.5f; // Low-pass filtering of the derivative component (0:no filtering, 1:values don't move!)
+	// VERTICAL PID CONTROLLER
+	public readonly double aiMax = 4;
+	public readonly double aiMin = -0.1;
+	public readonly double vertKp = 0.4;
+	public readonly double vertKi = 0.05;
+	public readonly double vertKd = 10;
+	public readonly double vertAdFilt=0.8; // Low-pass filter of the D component (0:no filtering, 1:values don't move!)
+	public readonly double vertAdMax=0.5;
 
 	// LIFT TO WEIGHT RATIO SETTINGS
 
 	// Margins applied to the ship LWR when computing the vertical speed target.
 	public readonly double LWRoffset = 0.0;
 	public readonly double LWRsafetyfactor = 1.1;
-	// The ship will not use a lift weight ratio higher than this limit
-	public readonly double LWRlimit = 3;
+	// The ship will not use a LWR higher than this limit
+	public readonly double LWRlimit = 5;
 	// The ship will not apply vertical acceleration higher than this limit
 	public readonly double accel_limit = 30; // m/s² including gravity
 
 	// SPEED TARGET COMPUTATION AT HIGH ALTITUDE
 	public readonly double vspeed_default = 200;
 	public readonly double vspeed_safe_limit = 500;
-	// When computing the vertical speed target, with the altitude/gravity formula
-	// the script uses a mix of the lift to weight
-	// ratio at the current altitude, and the expected lift-to-weight ratio at the planet surface
-	// This setting defines the weight for the surface value (ex : 0.6 = 60% ground, 40% now)
-	// A high value gives a more cautious landing, a low value a faster and riskier one
-	public readonly double LWR_mix_surf_ratio = 0.6;
+	public readonly double LWR_mix_gnd_ratio = 0.7;
 
 	// MODE 1 SETTINGS
-
-	// In mode 1, if the absolute value of the vertical speed is higher than this limit
-	// and the ship is above this altitude, then ion thrusters will be set to completely
-	// compensate the ship weight (if they are capable)
-	public readonly double early_ion_alt_limit = 2000;
-	public readonly double early_ion_speed_limit = 100;
-
-	// In mode 1, the ship evaluates if electric thrusters (ion and atmospheric) are
-	// sufficient on their own to land, otherwise it uses the hydrogen thrusters as well.
-	
-	// LWR of the electric thrusters when they start to be prioritized
 	public readonly double elec_LWR_start = 1.3;
-	// LWR of the electric thrusters when they are considered sufficient
 	public readonly double elec_LWR_sufficient = 2;
+	public readonly double mode1_ion_alt_limit = 2000;
+	public readonly double mode1_ion_speed = 100;
+	public readonly double mode1_atmo_speed = 10;
 
 	// SPEED TARGET FOR FINAL LANDING
-
-	// Below the transition altitude, the vertical speed target is a constant
-	// and in addition, we revert to radar altitude measurement (if available)
 	public readonly double transition_altitude = 20;
 	public readonly double final_speed = 1.5;
 
-	// PANIC MODE
-
-	// The ship will enter panic mode if the delta between speed target and actual speed
-	// is higher than this setting, while below the configured altitude
-	public readonly double panic_altitude = 2000;
-	public readonly double panic_speed_delta = 30;
+	// PANIC/MARGINAL DETECTION
+	public readonly double panicDelta = 5;
+	public readonly double panicRatio = 10;
+	public readonly double marginal_max = 10;
+	public readonly double marginal_warn = 5;
+	public readonly double h2_margin_warning = 5; //%
 
 	// LANDING/LIFTOFF TIMERS TRIGGER ALTITUDE
-	public readonly double landing_timer_altitude = 200;
-	public readonly double liftoff_timer_altitude = 250;
+	public readonly double landingTimerAltitude = 200;
+	public readonly double liftoffTimerAltitude = 250;
 
 	// RADAR CONFIGURATION
 	// The camera used as a ground radar will limit itself to this range (in meters)
-	public readonly double radar_max_range = 2e5;
+	public readonly double radarMaxRange = 2e5;
 
 	// SURFACE GRAVITY ESTIMATOR
-	public readonly double grav_est_altitude_transition_start = 10000;
-	public readonly double grav_est_altitude_transition_end = 5000;
-	public readonly double ground_grav_estimate_proportion = 0.8;
+	public readonly double gravTransitionHigh = 4000;
+	public readonly double gravTransitionLow = 1000;
+
+	// LEVELER AND TERRAIN AVOIDANCE SETTINGS
+
+	// Leveler settings
+	public readonly bool autoLevel = true; 
+	public readonly double maxAngle = 20;
+	public readonly int smartDelayTime=20;
+	public readonly double gyroResponsiveness=5;
+	public readonly double gyroRpmScale=0.1;
+
+	// Terrain Avoidance settings
+	public readonly bool terrainAvoidGyro = true;
+	public readonly bool terrainAvoidThrusters = true;
+	public readonly double horizKp = 0.4;
+	public readonly double horizKi = 0.1;
+	public readonly double horizKd = 0.1;
+	public readonly double horizAiMax = 0.1;
+	public readonly double speedScale = 20;
+	public readonly double inertiaRatioSmall = 1e7;
+	public readonly double inertiaRatioLarge = 6e8;
+
+	// LOGGING
+	public readonly bool ALLOW_LOGGING = false;
+	public readonly int LOG_FACTOR = 2;
 }
 
-public enum SetPointSource {
+/// <summary>
+/// An Enum to define the source of the vertical speed setpoint
+/// </summary>
+public enum SPSource {
 	None,
 	Profile,
 	AltGravFormula,
 	GravFormula,
-	FinalSpeed
-
+	FinalSpeed,
+	Unable
 }
 
+/// <summary>
+/// An Enum to define the source of the vertical speed setpoint
+/// </summary>
+public enum AltSource {
+	Undefined,
+	Ground,
+	Radar
+}
+
+/// <summary>
+/// Define the source of surface gravity estimate
+/// </summary>
+public enum GravSource {
+	Undefined,
+	Identified,
+	Estimate
+}
+
+/// <summary>
+/// Define the gravity warning type
+/// </summary>
+public enum WarnType {
+	Info,
+	Good,
+	Risk,
+	Bad
+}
+
+/// <summary>
+/// An Enum to define the current terrain scan mode
+/// </summary>
+public enum ScanMode {
+	NoRadar,
+	SingleStandby,
+	SingleNarrow,
+	DoubleStandby,
+	DoubleEarly,
+	DoubleWide
+}
+
+/// <summary>
+/// Struct with planet data
+/// </summary>
 public struct PlanetInfo {
-	public string shortname;
-	public string name;
-	public float atmo_density_sealevel;
-	public float atmo_limit_altitude;
-	public float hillparam;
-	public float g_sealevel;
-	public bool identified;
-	public bool ignore_atmo;
+	public string shortname, name;
+	public double atmo_density_sealevel, atmo_limit_altitude, hillparam, g_sealevel;
+	public bool ignore_atmo, precise, set;
+
+	public PlanetInfo(string shortname, string name, double atmo_density_sealevel, double atmo_limit_altitude, double hillparam, double g_sealevel, bool ignore_atmo, bool precise, bool set) {
+		this.shortname = shortname.ToLower();
+		this.name = name;
+		this.atmo_density_sealevel = atmo_density_sealevel >= 0 ? atmo_density_sealevel : 0;
+		this.atmo_limit_altitude = atmo_limit_altitude >= 0 ? atmo_limit_altitude : 0;
+		this.hillparam = hillparam >= 0 ? hillparam : 0;
+		this.g_sealevel = g_sealevel >= 0 ? g_sealevel : 0;
+		this.ignore_atmo = ignore_atmo;
+		this.precise = precise;
+		this.set = set;
+	}
 }
 
+/// <summary>
+/// List of planets with their data. See tech doc Appendix A.
+/// </summary>
 public class PlanetCatalog {
 	private List<PlanetInfo> Catalog;
 
 	public PlanetCatalog() {
 
-		Catalog = new List<PlanetInfo>();
+		// The "shortname" is used to identify the planet in the command line arguments
+		// and must be unique.
 
-		PlanetInfo unknown = new PlanetInfo();
-
+	Catalog = new List<PlanetInfo>
+		{
 		// The most generic planet, we don't know anything about it.
 		// It must always be in first position
-		// It is defined here as having a thick atmosphere to lower ion effectiveness but because it
-		// is unknown then the script will also completely ignore atmospheric thrusters capability
-		unknown.shortname = "unknown";
-		unknown.name ="Unknown Planet";
-		unknown.atmo_density_sealevel=1;
-		unknown.atmo_limit_altitude=2;
-		unknown.hillparam=0.20f;
-		unknown.g_sealevel=1f;
-		unknown.ignore_atmo=true;
-		unknown.identified=false;
-		Catalog.Add(unknown);
+		new PlanetInfo("unknown", "Unknown Planet", 1, 2, 0.1, 1, true, false, false),
+		new PlanetInfo("dynvacuum", "Deduced Vacuum Planet", 0, 0, 0.1, 1, false, false, true),
+		// We assume a moderately dense atmosphere but that doesn't go as high as Earthlike
+		new PlanetInfo("dynatmo", "Deduced Atmo Planet", 0.8, 1, 0.05, 1, false, false, true),
+		new PlanetInfo("vacuum", "Generic Vacuum Planet", 0, 0, 0.1, 1, false, false, true),
+		// We assume a moderately dense atmosphere but that doesn't go as high as Earthlike
+		new PlanetInfo("atmo", "Generic Atmo Planet", 0.8, 1, 0.05, 1, false, false, true),
 
-		PlanetInfo vacuum = new PlanetInfo();
-		vacuum.shortname = "vacuum";
-		vacuum.name ="Generic Vacuum Planet";
-		vacuum.atmo_density_sealevel=0;
-		vacuum.atmo_limit_altitude=0;
-		vacuum.hillparam=0.1f;
-		vacuum.g_sealevel=1f;
-		vacuum.ignore_atmo=false;
-		vacuum.identified=false;
-		Catalog.Add(vacuum);
 
-		PlanetInfo atmo = new PlanetInfo();
-		// We assume a dense atmosphere but that doesn't go as high as Earthlike
-		atmo.shortname = "atmo";
-		atmo.name ="Generic Atmo Planet";
-		atmo.atmo_density_sealevel=1;
-		atmo.atmo_limit_altitude=1;
-		atmo.hillparam=0.05f;
-		atmo.g_sealevel=1f;
-		atmo.ignore_atmo=false;
-		atmo.identified=false;
-		Catalog.Add(atmo);
+		// Vanilla planets of space engineers. Values read directly from PlanetGeneratorDefinitions.sbc or Pertam.sbc or Triton.sbc
 
-		// The following are the vanilla planets of space engineers.
-		// Values are read directly from the .sbc files (PlanetGeneratorDefinitions.sbc or Pertam.sbc or Triton.sbc)
+		new PlanetInfo("pertam", "Pertam", 1, 2, 0.025, 1.2, false, true, true),
+		new PlanetInfo("triton", "Triton", 1, 0.47, 0.20, 1, false, true, true),
+		new PlanetInfo("earth", "Earthlike", 1, 2, 0.12, 1, false, true, true),
+		new PlanetInfo("alien", "Alien", 1.2, 2, 0.12, 1.1, false, true, true),
+		new PlanetInfo("mars", "Mars (vanilla)", 1, 2, 0.12, 0.9, false, true, true),
+		new PlanetInfo("moon", "Moon (vanilla)", 0, 1, 0.03, 0.25, false, true, true),
 
-		PlanetInfo pertam = new PlanetInfo();
-		pertam.shortname = "pertam";
-		pertam.name ="Pertam";
-		pertam.atmo_density_sealevel=1;
-		pertam.atmo_limit_altitude=2;
-		pertam.hillparam=0.025f;
-		pertam.g_sealevel=1.2f;
-		pertam.ignore_atmo=false;
-		pertam.identified=true;
-		Catalog.Add(pertam);
+		// no value in .sbc file for atmo_density_sealevel and atmo_limit_altitude ?!
+		new PlanetInfo("europa", "Europa", 0.5, 1, 0.06, 0.25, false, true, true),
+		new PlanetInfo("titan", "Titan", 0.5, 1, 0.03, 0.25, false, true, true),
 
-		PlanetInfo triton = new PlanetInfo();
-		triton.shortname = "triton";
-		triton.name ="Triton";
-		triton.atmo_density_sealevel=1;
-		triton.atmo_limit_altitude=0.47f;
-		triton.hillparam=0.20f;
-		triton.g_sealevel=1f;
-		triton.ignore_atmo=false;
-		triton.identified=true;
-		Catalog.Add(triton);
+		// Below are additional planets from mods or custom planets that I like a lot
 
-		PlanetInfo earthlike = new PlanetInfo();
-		earthlike.shortname = "earth";
-		earthlike.name ="Earthlike";
-		earthlike.atmo_density_sealevel=1;
-		earthlike.atmo_limit_altitude=2f;
-		earthlike.hillparam=0.12f;
-		earthlike.g_sealevel=1f;
-		earthlike.ignore_atmo=false;
-		earthlike.identified=true;
-		Catalog.Add(earthlike);
+		// by Major Jon
+		new PlanetInfo("komorebi", "Komorebi", 1.12, 2.4, 0.032, 1.14, false, true, true),
+		new PlanetInfo("orlunda", "Orlunda", 0.89, 6, 0.01, 1.12, false, true, true),
+		new PlanetInfo("trelan", "Trelan", 1, 1.2, 0.1285, 0.92, false, true, true),
+		new PlanetInfo("teal", "Teal", 1, 2, 0.02, 1, false, true, true),
+		new PlanetInfo("kimi", "Kimi", 0, 1, 0, 0.05, false, true, true),
+		new PlanetInfo("qun", "Qun", 0, 1, 0.25, 0.42, false, true, true),
+		new PlanetInfo("tohil", "Tohil", 0.5, 1, 0.03, 0.328, false, true, true),
+		new PlanetInfo("satreus", "Satreus", 0.9, 1.5, 0.04, 0.95, false, true, true),
 
-		PlanetInfo alien = new PlanetInfo();
-		alien.shortname = "alien";
-		alien.name ="Alien";
-		alien.atmo_density_sealevel=1.2f;
-		alien.atmo_limit_altitude=2f;
-		alien.hillparam=0.12f;
-		alien.g_sealevel=1.1f;
-		alien.ignore_atmo=false;
-		alien.identified=true;
-		Catalog.Add(alien);
+		// by Elindis
+		new PlanetInfo("pyke", "Pyke", 1.5, 2, 0.06, 1.42, false, true, true),
+		new PlanetInfo("saprimentas", "Saprimentas", 1.5, 2, 0.07, 0.96, false, true, true),
+		new PlanetInfo("aulden", "Aulden", 1.2, 2, 0.10, 0.82, false, true, true),
+		new PlanetInfo("silona", "Silona", 0.85, 2, 0.03, 0.64, false, true, true),
 
-		PlanetInfo mars = new PlanetInfo();
-		mars.shortname = "mars";
-		mars.name ="Mars";
-		mars.atmo_density_sealevel=1;
-		mars.atmo_limit_altitude=2;
-		mars.hillparam=0.12f;
-		mars.g_sealevel=0.9f;
-		mars.ignore_atmo=false;
-		mars.identified=true;
-		Catalog.Add(mars);
+		// by Infinite
+		new PlanetInfo("argus", "Argus", 0.79, 2, 0.01, 1.45, false, true, true),
+		new PlanetInfo("aridus", "Aridus", 1.3, 1, 0.1, 0.5, false, true, true),
+		new PlanetInfo("microtech", "Microtech", 1, 0.5, 0.25, 1f, false, true, true),
+		new PlanetInfo("hurston", "Hurston", 1, 1.9, 0.11, 1.1, false, true, true),
 
-		PlanetInfo moon = new PlanetInfo();
-		moon.shortname = "moon";
-		moon.name ="Moon";
-		moon.atmo_density_sealevel=0;
-		moon.atmo_limit_altitude=1;
-		moon.hillparam=0.03f;
-		moon.g_sealevel=0.25f;
-		moon.ignore_atmo=false;
-		moon.identified=true;
-		Catalog.Add(moon);
+		// from the Solar System Pack by Infinite
+		new PlanetInfo("terra", "(Terra) Earth by Infinite", 2, 0.9, 0.02, 1, false, true, true),
+		new PlanetInfo("luna", "Luna by Infinite", 0, 1, 0.07, 0.16, false, true, true),
+		// because the script uses the first match, "mars" will still match the vanilla Mars
+		new PlanetInfo("sspmar", "Mars by Infinite", 0.006, 2, 0.09, 0.38, false, true, true),
+		new PlanetInfo("venus", "Venus by Infinite", 92, 2, 0.04, 0.9, false, true, true),
+		new PlanetInfo("mercury", "Mercury by Infinite", 0, 1, 0.1, 0.37, false, true, true),
+		new PlanetInfo("ceres", "Ceres by Infinite", 0, 0.5, 0.1, 0.05, false, true, true),
 
-		PlanetInfo europa = new PlanetInfo();
-		europa.shortname = "europa";
-		europa.name ="Europa";
-		europa.atmo_density_sealevel=0.5f; // no value in .sbc file ?!
-		europa.atmo_limit_altitude=1;	// no value in .sbc file ?!
-		europa.hillparam=0.06f;
-		europa.g_sealevel=0.25f;
-		europa.ignore_atmo=false;
-		europa.identified=true;
-		Catalog.Add(europa);
-
-		PlanetInfo titan = new PlanetInfo();
-		titan.shortname = "titan";
-		titan.name ="Titan";
-		titan.atmo_density_sealevel=0.5f; // no value in .sbc file ?!
-		titan.atmo_limit_altitude=1;	// no value in .sbc file ?!
-		titan.hillparam=0.03f;
-		titan.g_sealevel=0.25f;
-		titan.ignore_atmo=false;
-		titan.identified=true;
-		Catalog.Add(titan);
-
+		// by Almirante Orlock
+		new PlanetInfo("helghan", "Helghan", 1.2, 3.5, 0.01, 1.1, false, true, true)
+		};
 	}
 
-	public PlanetInfo get_planet(string command) {
+	public PlanetInfo get_planet(string command, out bool found) {
 		foreach (PlanetInfo candidate in Catalog) {
-			if (command.Contains(candidate.shortname)) {
+			if (command.ToLower().Contains(candidate.shortname)) {
+				found = true;
 				return candidate;
 			}
 		}
-
+		found = false;
 		return Catalog[0];
 	}
 }
 
+/// <summary>
+/// Class with all ship blocks needed by the script
+/// </summary>
 public class ShipBlocks {
 
-	public List<IMyTerminalBlock> aero_lifters;
-	public List<IMyTerminalBlock> ion_lifters;
-	public List<IMyTerminalBlock> h2_lifters;
-	public List<IMyTerminalBlock> SLM_displays;
-	public List<IMyTerminalBlock> SLM_debug;
-	public List<IMyTerminalBlock> SLM_graph;
+
+	public ThrGroup lifters, fwdThr, rearThr, leftThr, rightThr;
+	public List<IMyTerminalBlock> MainDisplays, DebugDisplays;
 	public List<IMyParachute> parachutes;
 	public IMyShipController ship_ctrller;
-	public List<IMyTerminalBlock> landing_timers;
-	public List<IMyTerminalBlock> liftoff_timers;
-	public List<IMyTerminalBlock> on_timers;
-	public List<IMyTerminalBlock> off_timers;
-	public IMyCameraBlock radar;
-	public bool ship_has_radar = false;
-	public IMySoundBlock soundblock;
-	public bool ship_has_soundblock = false;
+	public List<IMyTerminalBlock> landing_timers, liftoff_timers;
+	public List<IMyTerminalBlock> on_timers, off_timers;
+	public List<IMyGyro> gyros;
+	public List<IMyLandingGear> gears;
+	public List<IMyTerminalBlock> radars;
+	public List<IMyTerminalBlock> soundblocks;
+	public List<IMyGasTank> h2_tanks;
+
+	public ShipBlocks() {
+		// Only lists are initialized here, the rest is done in GetBlocks()
+		MainDisplays = new List<IMyTerminalBlock>();
+		DebugDisplays = new List<IMyTerminalBlock>();
+		parachutes = new List<IMyParachute>();
+		landing_timers = new List<IMyTerminalBlock>();
+		liftoff_timers = new List<IMyTerminalBlock>();
+		on_timers = new List<IMyTerminalBlock>();
+		off_timers = new List<IMyTerminalBlock>();
+		gyros = new List<IMyGyro>();
+		gears = new List<IMyLandingGear>();
+		radars = new List<IMyTerminalBlock>();
+		soundblocks = new List<IMyTerminalBlock>();
+		h2_tanks = new List<IMyGasTank>();
+	}
 
 }
 
 
 	
-public LandingManager manager;
+LandingManager manager;
+RunTimeCounter runtime;
+Logger logger;
+bool ranTick1=false;
+bool ranTick10=false;
+bool ranTick100=false;
+bool logging = false;
 
 
 
 public Program()
 {
-    // The constructor.
+	// The constructor.
 
-    Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
+	Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
 	
 	SLMShipConfiguration shipconfig = new SLMShipConfiguration();
 	ShipBlocks ship = GetBlocks(shipconfig);
@@ -404,328 +369,295 @@ public Program()
 
 	PlanetCatalog catalog = new PlanetCatalog();
 
-	manager = new LandingManager(config, ship, catalog);
+	runtime = new RunTimeCounter(this);
+	manager = new LandingManager(config, ship, catalog, runtime);
+
+	logger = new Logger(manager.AllLogNames(), config.LOG_FACTOR, config.ALLOW_LOGGING);
 
 }
-
-
-public class Helpers
-{
-
-	// Some inspiration from  Flight Assist by Naosyth
-
-    public static double NotNan(double val)
-    {
-        if (double.IsNaN(val))
-            return 0;
-        return val;
-    }
-
-	public static float NotNan(float val)
-    {
-        if (float.IsNaN(val))
-            return 0;
-        return val;
-    }
-	
-	const double BIT_SPACING = 255.0 / 7.0;
-	public static char ColorToChar(byte r, byte g, byte b) {
-		return (char)(0xe100 + ((int)Math.Round(r / BIT_SPACING) << 6) + ((int)Math.Round(g / BIT_SPACING) << 3) + (int)Math.Round(b / BIT_SPACING));
-	}
-
-	// The max value has priority, ie if min>max, the function returns max
-	// Version for floats
-	public static float SaturateMinMaxPrioritizeMaxLimit(float value, float min, float max) {
-		return Math.Min(Math.Max(value,min),max);
-	}
-
-	// Version for doubles
-	public static double SaturateMinMaxPrioritizeMaxLimit(double value, double min, double max) {
-		return Math.Min(Math.Max(value,min),max);
-	}
-
-	public static double g_to_ms2(double g) {
-		return g*9.81;
-	}
-
-	public static double ms2_to_g(double a) {
-		return a/9.81;
-	}
-	
-	
-	
-}
-
 
 public void Main(string argument, UpdateType updateSource)
 
 {
+	runtime.Count(ranTick1,ranTick10,ranTick100);
 
 	// MANAGE ARGUMENTS AND REFRESH SOURCE
 	if ((updateSource & (UpdateType.Trigger | UpdateType.Terminal)) != 0)
   	{
 		if (argument == "off") {
-			manager.ConfigureMode0();
-		} else if (argument.Contains("mode1")) {
-			manager.ConfigureMode1();
-		} else if (argument.Contains("mode2")) {
-			manager.ConfigureMode2();
-		}
 
-		manager.SetPlanet(argument);
+			manager.ConfigureMode0();
+			logging = false;
+			logger.Clear();
+
+		} else {
+			
+			if (argument.Contains("mode1")) {
+				manager.ConfigureMode1();
+				logging = true;
+			}
+
+			if (argument.Contains("mode2")) {
+				manager.ConfigureMode2();
+				logging = true;
+			}
+
+			if (argument.Contains("mode3")) {
+				manager.ConfigureMode3();
+				logging = true;
+			}
+
+			if (argument.Contains("angleoff")) manager.use_angle = false;
+			if (argument.Contains("angleon")) manager.use_angle = true;
+			if (argument.Contains("angleswitch")) manager.use_angle = !manager.use_angle;
+
+			if (argument.Contains("thrustersoff")) manager.use_horiz_thr = false;
+			if (argument.Contains("thrusterson")) manager.use_horiz_thr = true;
+			if (argument.Contains("thrustersswitch")) manager.use_horiz_thr = !manager.use_horiz_thr;
+
+			if (argument.Contains("leveloff")) manager.DisableLeveler();
+			if (argument.Contains("levelon")) manager.EnableLeveler();
+			if (argument.Contains("levelswitch")) manager.SwitchLeveler();
+
+			manager.SetPlanet(argument);
+
+			if (argument.Contains("dumplog")) {
+				logging = false;
+				Me.CustomData = logger.Output();
+			}
+
+			if (argument.Contains("clearlog")) logger.Clear();
+
+		}
 	}
 
+	ranTick1=false;
+	ranTick10=false;
+	ranTick100=false;
+
 	if ((updateSource & UpdateType.Update100) != 0) {
+		ranTick100=true;
 		manager.Tick100();
 	}
 
 	if ((updateSource & UpdateType.Update10) != 0) {
+		ranTick10=true;
 		manager.Tick10();
 	}
 
 	if ((updateSource & UpdateType.Update1) != 0) {
+		ranTick1=true;
 		manager.Tick1();
+
+		if (logging) logger.Log(manager.AllLogValues());
+
 	}
 	
 }
 
 
-
+/// <summary>
+/// Get all the blocks needed by the script and return them in a ShipBlocks object
+/// </summary>
 public ShipBlocks GetBlocks(SLMShipConfiguration config) {
 
-	// Scan the grid for the appropriately set up blocks
-    // and return a ShipBlocks object
-
-	// Temporary lists
-
-	List<IMyTerminalBlock> aero_lifters = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> ion_lifters = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> h2_lifters = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> SLM_displays = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> SLM_debug = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> SLM_graph = new List<IMyTerminalBlock>();
-	List<IMyParachute> parachutes = new List<IMyParachute>();
-	IMyShipController ship_ctrller;
-	List<IMyTerminalBlock> landing_timers = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> liftoff_timers = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> on_timers = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> off_timers = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> possible_radars = new List<IMyTerminalBlock>();
-	List<IMyTerminalBlock> possible_sound = new List<IMyTerminalBlock>();
+	var s = new ShipBlocks();
 
 	Echo ("SOFT LANDING MANAGER");
 
 	// Look for blocks based on the name
+	GridTerminalSystem.SearchBlocksOfName(config.LCD_NAME, s.MainDisplays, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.MainDisplays.Count+" display(s)");
 
-    GridTerminalSystem.SearchBlocksOfName(config.lcd_name, SLM_displays);
-	Echo ("Found "+SLM_displays.Count+" display(s)");
+	GridTerminalSystem.SearchBlocksOfName(config.DEBUGLCD_NAME, s.DebugDisplays, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.DebugDisplays.Count+" debug display(s)");
 
-	GridTerminalSystem.SearchBlocksOfName(config.debuglcd_name, SLM_debug);
-	Echo ("Found "+SLM_debug.Count+" debug display(s)");
+	GridTerminalSystem.SearchBlocksOfName(config.RADAR_NAME, s.radars, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.radars.Count+" radar(s)");
 
-	GridTerminalSystem.SearchBlocksOfName(config.graphlcd_name, SLM_graph);
-	Echo ("Found "+SLM_graph.Count+" graph display(s)");
+	GridTerminalSystem.SearchBlocksOfName(config.LANDING_TIMER_NAME, s.landing_timers, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.landing_timers.Count+" landing timer(s)");
 
-	GridTerminalSystem.SearchBlocksOfName(config.radar_name, possible_radars);
-	Echo ("Found "+possible_radars.Count+" radar(s)");
+	GridTerminalSystem.SearchBlocksOfName(config.LIFTOFF_TIMER_NAME, s.liftoff_timers, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.liftoff_timers.Count+" liftoff timer(s)");
 
-	GridTerminalSystem.SearchBlocksOfName(config.landing_timer_name, landing_timers);
-	Echo ("Found "+landing_timers.Count+" landing timer(s)");
+	GridTerminalSystem.SearchBlocksOfName(config.ON_TIMER_NAME, s.on_timers, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.on_timers.Count+" on timer(s)");
 
-	GridTerminalSystem.SearchBlocksOfName(config.liftoff_timer_name, liftoff_timers);
-	Echo ("Found "+liftoff_timers.Count+" liftoff timer(s)");
+	GridTerminalSystem.SearchBlocksOfName(config.OFF_TIMER_NAME, s.off_timers, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.off_timers.Count+" off timer(s)");
 
-	GridTerminalSystem.SearchBlocksOfName(config.on_timer_name, on_timers);
-	Echo ("Found "+on_timers.Count+" on timer(s)");
-
-	GridTerminalSystem.SearchBlocksOfName(config.off_timer_name, off_timers);
-	Echo ("Found "+off_timers.Count+" off timer(s)");
-
-	GridTerminalSystem.SearchBlocksOfName(config.sound_name, possible_sound);
-	Echo ("Found "+possible_sound.Count+" sound blocks(s)");
-
+	GridTerminalSystem.SearchBlocksOfName(config.SOUND_NAME, s.soundblocks, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.soundblocks.Count+" sound blocks(s)");
 
 	// Look for blocks based on the type
 
-	GridTerminalSystem.GetBlocksOfType(parachutes);
-	Echo ("Found "+parachutes.Count+" parachutes");
+	GridTerminalSystem.GetBlocksOfType(s.parachutes, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.parachutes.Count+" parachutes");
+
+	GridTerminalSystem.GetBlocksOfType(s.gyros, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.gyros.Count+" gyros");
+
+	GridTerminalSystem.GetBlocksOfType(s.gears, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	Echo ("Found "+s.gears.Count+" landing gears");
+
+	var all_tanks = new List<IMyGasTank >();
+	GridTerminalSystem.GetBlocksOfType(all_tanks, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	foreach (IMyGasTank tank in all_tanks) {
+		if (tank.BlockDefinition.SubtypeName.Contains("Hydrogen")) {
+			Echo ("Found h2 tank:"+tank.CustomName);
+			s.h2_tanks.Add(tank);
+		}
+	}
 
 	// Find a suitable ship controller.
-	// We prefer the one that matches the configured name, otherwise select the first available
-	ship_ctrller = GridTerminalSystem.GetBlockWithName(config.ctrller_name) as IMyShipController;
-	if (ship_ctrller == null) {
-		List<IMyShipController> possible_controllers = new List<IMyShipController>();
-		GridTerminalSystem.GetBlocksOfType(possible_controllers);
+	// Prefer the one that matches the configured name, otherwise select the first available one
+	var possible_ctrller = new List<IMyTerminalBlock>();
+
+	GridTerminalSystem.SearchBlocksOfName(config.CTRLLER_NAME, possible_ctrller, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
+	if (possible_ctrller.Count == 1) {
+		s.ship_ctrller = possible_ctrller[0] as IMyShipController;
+		Echo ("Using configured controller:" + s.ship_ctrller.CustomName);
+	} else {
+		var possible_controllers = new List<IMyShipController>();
+		GridTerminalSystem.GetBlocksOfType(possible_controllers, b => b.CanControlShip);
 		if (possible_controllers.Count == 0) {
 			throw new Exception("Error: no suitable cockpit or remote control block.");
 		} else {
-			ship_ctrller = possible_controllers[0];
-			Echo ("Found a ship controller:" + ship_ctrller.CustomName);
-		}
-	} else {
-		Echo ("Using configured controller:" + ship_ctrller.CustomName);
-	}
-
-	// Find thrusters (lifters) based on orientation
-
-	List<IMyThrust> possible_thrusters = new List<IMyThrust>();
-	GridTerminalSystem.GetBlocksOfType(possible_thrusters);
-
-	foreach (IMyThrust thru in possible_thrusters) {
-
-		if (!thru.CustomName.Contains(config.lifter_ignore_name)) {
-
-			// If the thruster does not have the ignore tag (configurable), then it is a candidate
-			// First we check the direction
-
-			Matrix MatrixCockpit,MatrixThrust;
-			thru.Orientation.GetMatrix(out MatrixThrust);
-			ship_ctrller.Orientation.GetMatrix(out MatrixCockpit);
-
-			if (MatrixThrust.Forward==MatrixCockpit.Down) {
-
-				// If the thruster goes in the correct direction (up)
-				// we add it to the correct list
-
-				string name = thru.DefinitionDisplayNameText.ToString();
-
-				if (name.Contains("Hydrogen")) {
-					h2_lifters.Add(thru);
-				}
-
-				if (name.Contains("Ion") || name.Contains("Prototech")) {
-					ion_lifters.Add(thru);
-				}
-
-				if (name.Contains("Atmo")) {
-					aero_lifters.Add(thru);
-				}
-			} 
-
-		} else {
-			Echo ("Ignored thruster:" + thru.CustomName);
+			s.ship_ctrller = possible_controllers[0];
+			Echo ("Found a ship controller:" + s.ship_ctrller.CustomName);
 		}
 	}
-	Echo ("Found "+h2_lifters.Count+" h2 lifters");
-	Echo ("Found "+ion_lifters.Count+" ion lifters");
-	Echo ("Found "+aero_lifters.Count+" aero lifters");
 
-	
+	// Find thrusters based on orientation
+	var fwd_thrusters = new List<IMyThrust>();
+	var rear_thrusters = new List<IMyThrust>();
+	var left_thrusters = new List<IMyThrust>();
+	var right_thrusters = new List<IMyThrust>();
+	var lifters = new List<IMyThrust>();
 
-	// Create the final object
+	var possible_thrusters = new List<IMyThrust>();
 
-	ShipBlocks block = new ShipBlocks();
-	block.aero_lifters = aero_lifters;
-	block.ion_lifters = ion_lifters;
-	block.h2_lifters = h2_lifters;
-	block.SLM_displays = SLM_displays;
-	block.SLM_debug = SLM_debug;
-	block.SLM_graph = SLM_graph;
-	block.parachutes = parachutes;
-	block.ship_ctrller = ship_ctrller;
-	block.landing_timers = landing_timers;
-	block.liftoff_timers = liftoff_timers;
-	block.on_timers = on_timers;
-	block.off_timers = off_timers;
+	GridTerminalSystem.GetBlocksOfType(possible_thrusters, b => b.IsSameConstructAs(Me) && !b.CustomName.Contains(config.IGNORE_NAME));
 
-	if (possible_sound.Count > 0) {
-		
-		block.soundblock = (IMySoundBlock) possible_sound[0];
-		block.ship_has_soundblock = true;
+	foreach (IMyThrust t in possible_thrusters) {
+
+		Matrix MatrixCockpit,MatrixThrust;
+		t.Orientation.GetMatrix(out MatrixThrust);
+		s.ship_ctrller.Orientation.GetMatrix(out MatrixCockpit);
+
+		if (MatrixThrust.Forward==MatrixCockpit.Down) {
+			lifters.Add(t);
+		} else if (MatrixThrust.Forward==MatrixCockpit.Backward) {
+			fwd_thrusters.Add(t);
+		} else if (MatrixThrust.Forward==MatrixCockpit.Forward) {
+			rear_thrusters.Add(t);
+		} else if (MatrixThrust.Forward==MatrixCockpit.Right) {
+			left_thrusters.Add(t);
+		} else if (MatrixThrust.Forward==MatrixCockpit.Left) {
+			right_thrusters.Add(t);
+		}
 	}
 
-	if (possible_radars.Count > 0) {
-		
-		block.radar = (IMyCameraBlock) possible_radars[0];
-		block.ship_has_radar = true;
-	}
-	
+	s.lifters = new ThrGroup(lifters);
 
-	return block;
+	Echo ("Found "+s.lifters.Inventory()+" lifters");
+
+	s.fwdThr = new ThrGroup(fwd_thrusters);
+	s.rearThr = new ThrGroup(rear_thrusters);
+	s.leftThr = new ThrGroup(left_thrusters);
+	s.rightThr = new ThrGroup(right_thrusters);
+
+	Echo ("Found "+s.fwdThr.Inventory()+" fwd thrusters");
+	Echo ("Found "+s.rearThr.Inventory()+" rear thrusters");
+	Echo ("Found "+s.leftThr.Inventory()+" left thrusters");
+	Echo ("Found "+s.rightThr.Inventory()+" right thrusters");
+
+	// Return the final object
+
+	return s;
 }
 
+/// <summary>
+/// Main class for the landing manager
+/// </summary>
 public class LandingManager {
 
 	// TODO : too many attibutes used as global variables !
 	// This should be refactored at some point !
 
-	public int mode = 0;
+	int mode = 0;
+	public bool use_angle, use_horiz_thr,level;
 
-	double realPressure = 0;
+	double observed_density = -1;
 
-	double naturgraval=0;
-	double shipweight = 0;
-	double gnd_altitude = 0; 
+	double grav_now=0, shipWeight = 0;
+	double gndAltitude = 0, slAltitude = 0, gnd_sl_offset=0;
+	double radar_offset=0;
 
-	double current_aLWR = 0;
-	double current_iLWR = 0;
-	double current_hLWR = 0;
-	double max_aLWR_gnd_vacuum = 0;
-	double max_iLWR_gnd_vacuum = 0;
-	double max_hLWR_gnd_vacuum = 0;
-	double max_aLWR_gnd_atmo = 0;
-	double max_iLWR_gnd_atmo = 0;
-	double max_hLWR_gnd_atmo = 0;
+	double current_aLWR = 0,current_iLWR = 0,current_hLWR = 0;
+	double max_aLWR_gnd_vacuum = 0, max_iLWR_gnd_vacuum = 0, max_hLWR_gnd_vacuum = 0;
+	double max_aLWR_gnd_atmo = 0, max_iLWR_gnd_atmo = 0, max_hLWR_gnd_atmo = 0;
 
 	double current_LWRtarget = 0;
-	double ground_LWRtarget_vacuum = 0;
-	double ground_LWRtarget_atmo = 0;
-
-	double vspeed_sp = 0;
-	double vspeed = 0;
-
-	double delta = 0;
-	float atmo_override = -1;
-	float ion_override = -1;
-	float h2_override = -1;
+	double vertSpeedSetpoint = 0, vertSpeed = 0, fwdSpeedSetpoint = 0, fwdSpeed = 0, leftSpeedSetpoint = 0, leftSpeed = 0;
+	double vertSpeedDelta = 0, thrCommand = 0, lwrCommand = 0;
 	bool panic = false;
-	bool marginal = false;
-	bool H2_needed = false;
+	int marginal = 0;
+	
+	bool landing_timer_allowed = false, liftoff_timer_allowed = false;
+	
+	double gndGravExp;
+	double maxGNow;
+	WarnType warningState = WarnType.Info;
 
-	bool landing_timer_allowed = false;
-	bool liftoff_timer_allowed = false;
-
-	double radar_distance = 1e6;
-	double radar_avail_range=0;
-	double radar_range = 100000;
-	bool radar_valid = false;
-	MyDetectedEntityInfo radar_return;
-
-	Vector3D hitpos;
-	Vector3D mypos;
-	string altitude_source;
-	double graval_expected;
-	double maxg_vacuum;
-	double maxg_atmo;
-	bool warning_vacuum = false;
-	bool warning_atmo = false;
-	double debug_htr_wanted;
-	double debug_itr_wanted;
-	double debug_atr_wanted;
-	double debug_tr_wanted;
-	SetPointSource speed_sp_source=SetPointSource.None;
+	SPSource speedSetpointSrc=SPSource.None;
+	AltSource altSrc=AltSource.Undefined;
+	GravSource gravSrc=GravSource.Undefined;
 
 	SLMConfiguration config;
 	ShipBlocks ship;
-	EarlySurfaceGravityEstimator surf_grav_estimator;
+	EarlySurfaceGravityEstimator estimator;
 	ShipInfo shipinfo;
 	LiftoffProfileBuilder profile;
 	PlanetInfo planet;
 	PlanetCatalog catalog;
-	PIDController PID;
+	PIDController vert_PID;
+	AutoLeveler leveler;
+	GroundRadar radar;
+	HorizontalThrusters horizThrusters;
+	RunTimeCounter runTime;
+	MovingAverage speed_tgt,left_speed_tgt, fwd_speed_tgt, alt_filt;
 
 
 
 	
-	public LandingManager(SLMConfiguration conf, ShipBlocks ship_defined, PlanetCatalog catalog_input) {
+	public LandingManager(SLMConfiguration conf, ShipBlocks ship_defined, PlanetCatalog catalog_input, RunTimeCounter runTime) {
 		config = conf;
 		ship = ship_defined;
 		catalog = catalog_input;
+		this.runTime = runTime;
 
-		surf_grav_estimator = new EarlySurfaceGravityEstimator();
-		shipinfo = new ShipInfo();
+		estimator = new EarlySurfaceGravityEstimator();
+		shipinfo = new ShipInfo(ship, config);
 		profile = new LiftoffProfileBuilder();
-		PID = new PIDController(conf.kp, conf.ki, conf.kd, conf.ai_min, conf.ai_max, conf.ad_filt);
+		vert_PID = new PIDController(conf.vertKp, conf.vertKi, conf.vertKd, conf.aiMin, conf.aiMax, conf.vertAdFilt, config.vertAdMax);
+		
+		leveler = new AutoLeveler(ship.ship_ctrller, ship.gyros, Math.Min(config.maxAngle,shipinfo.MaxAngle()), config.smartDelayTime, config.gyroResponsiveness, config.gyroRpmScale);
+
+		radar = new GroundRadar(ship.radars, config.radarMaxRange, config.speedScale);
+
+		horizThrusters = new HorizontalThrusters(ship, config.smartDelayTime, config.horizKp, config.horizKi, config.horizKd, config.horizAiMax);
+
+		left_speed_tgt = new MovingAverage(5);
+		fwd_speed_tgt = new MovingAverage(5);
+		alt_filt = new MovingAverage(3);
+		speed_tgt = new MovingAverage(60);
+
+		// These initial settings can be dynamically changed by the pilot
+		use_angle = config.terrainAvoidGyro;
+		use_horiz_thr = config.terrainAvoidThrusters;
+		level = config.autoLevel;
 
 		ConfigureMode0();
 		SetUpLCDs();
@@ -740,124 +672,155 @@ public class LandingManager {
 
 	public void ConfigureMode0() {
 		mode = 0;
-		Disable_Override();
+		ship.lifters.Disable();
 		DisableRadar();
 		SetPlanet("unknown");
 		TriggerOffTimers();
 		profile.Invalidate();
-		speed_sp_source = SetPointSource.None;
+		speedSetpointSrc = SPSource.None;
+		altSrc = AltSource.Undefined;
+		gravSrc = GravSource.Undefined;
+		radar.mode = ScanMode.NoRadar;
+		leveler.Disable();
+		horizThrusters.Disable();
+		estimator.Reset();
 	}
 
 	public void ConfigureMode1() {
 		
-		if (mode == 0) {
-
-			// These actions only if the SLM was off previously
-			// (the pilot may switch between mode1 and mode2 during the
-			// descent and we don't want to reset everything)
-
+		if (mode != 2 && mode != 1) {
+			// Only if the SLM was off previously
 			StartRadar();
-			radar_distance = 1e7;
 			TriggerOnTimers();
 			profile.Invalidate();
 		}
 
 		mode = 1;
 		ship.ship_ctrller.DampenersOverride = false;
+		if (level) leveler.Enable();
 	}
 
 	public void ConfigureMode2() {
 		
-		
-		if (mode == 0) {
-
-			// These actions only if the SLM was off previously
-
+		if (mode != 2 && mode != 1) {
+			// Only if the SLM was off previously
 			StartRadar();
-			radar_distance = 1e7;
 			TriggerOnTimers();
 			profile.Invalidate();
 		}
 		
 		mode = 2;
 		ship.ship_ctrller.DampenersOverride = false;
+		if (level) leveler.Enable();
+	}
+
+	public void ConfigureMode3() {
+		mode = 3;
+		if (level) leveler.Enable();
+		horizThrusters.Disable();
+		ship.lifters.Disable();
 	}
 
 	public void SetPlanet(string name) {
-		planet = catalog.get_planet(name);
+		bool found;
+		PlanetInfo tplanet = catalog.get_planet(name, out found);
+		if (found) planet = tplanet;
 	}
 
-	// Executed every 100 ticks (approx 1,6sec)
+	// See tech doc §2.2
 	public void Tick100() {
-		surf_grav_estimator.UpdateEstimates(naturgraval, gnd_altitude, config.grav_est_altitude_transition_end);
 		
-		if (config.SLOW_PROFILE_UPDATE  && config.USE_PROFILE == true ) {
-			UpdateProfile();
-			UpdateGraphDisplays();
-		} else if (config.USE_PROFILE == true && mode == 0) {
-			UpdateGraphDisplays();
-		}
-		
+		estimator.UpdateEstimates(grav_now, slAltitude, planet.hillparam);
 
 		ManageSoundBlocks();
+		shipinfo.UpdateMass();
+		shipinfo.UpdateInertia();
+		UpdateMaxGravitiesAndWarning();
+		UpdatePlanetAtmo();
+		ship.lifters.UpdateDensitySweep();
+		
 	}
-	
-	// Executed every 10 ticks (approx 160msec)
+
+	// See tech doc §2.2
 	public void Tick10() {
-		UpdatePressure();
+
+		UpdateGrav();
 		UpdateShipWeight();
+		ship.lifters.UpdateThrust();
+		horizThrusters.UpdateThrust();
 		UpdateAvailableLWR();
 
-		graval_expected = EstimateSurfaceGravity();
-
-		shipinfo.UpdateMass(ship);
-		shipinfo.UpdateThrust(ship);
+		ComputeSurfaceGravityEstimate();
+		
+		UpdateLWRTarget();
+		
 		
 		if ((mode == 1) || (mode == 2)) {
-			ManageRadars();
 
-			// In mode 1 and 2, altitude is updated in Tick1, if we're in another mode
-			// then we need to update it here.
+			ManageRadars();
+			UpdateProfile();
+
+		} else {
 
 			UpdateAltitude();
-
-			if (config.SLOW_PROFILE_UPDATE == false && config.USE_PROFILE == true) {
-				UpdateProfile();
-				UpdateGraphDisplays();
-			}
+			UpdateShipSpeeds();
 		}
 
-		ManageTimers();
-		ManageParachutes();
 		UpdateDisplays();
+		ManageTimers();
+		ManagePanicParachutes();
 		UpdateDebugDisplays();
 
 		// Manage next mode transition
 
-		// If there's not gravity, disable the SLM
-		if (naturgraval == 0) {
+		// Disable the SLM if:
+		// - there is no gravity
+		// - we've landed (detected from the altitude)
+		// - the landing gear is locked
+		if ((grav_now == 0 || gndAltitude < 2 || CheckGearLock()) && mode != 0)
 			ConfigureMode0();
-		}
 		
-		// If we've landed, disable the SLM
-		if (gnd_altitude < 2) {
-			ConfigureMode0();
-		}
 	}
 
 
-	// Executed every ticks (16msec)
+	// See tech doc §2.2
 	public void Tick1() {
 
 		if ((mode == 1) || (mode == 2)) {
+
+			// Manage vertical speed
+			radar.IncrementAltAge();
 			UpdateAltitude();
-			UpdateVertSpeed();
-			UpdateLWRTarget();
-			UpdateSpeedsp();
-			delta = vspeed_sp - vspeed;
-			
-			PID.UpdatePIDController((float)delta, (float)(current_aLWR + current_iLWR + current_hLWR));
-			ApplyThrustOverride(PID.PIDoutput);
+
+			UpdateShipSpeeds();
+			UpdateSpeedSetPoint();
+			vertSpeedDelta = vertSpeedSetpoint - vertSpeed;
+
+			vert_PID.UpdatePIDController(vertSpeedDelta, config.aiMin, current_aLWR + current_iLWR + current_hLWR);
+			ApplyThrustOverride(vert_PID.output);
+
+			// Manage horizontal speed
+
+			left_speed_tgt.AddValue(radar.RecommandLeftSpeed());
+			fwd_speed_tgt.AddValue(radar.RecommandFwdSpeed());
+			fwdSpeedSetpoint = fwd_speed_tgt.Get();
+			leftSpeedSetpoint = left_speed_tgt.Get();
+
+			if (level) {
+				if (use_angle) {
+					leveler.Tick(fwdSpeed, leftSpeed,fwdSpeedSetpoint, leftSpeedSetpoint);
+				} else {
+					leveler.Tick(fwdSpeed, leftSpeed,0,0);
+				}
+			}
+
+			if (use_horiz_thr == true)
+				horizThrusters.Tick(fwdSpeed, leftSpeed,fwdSpeedSetpoint, leftSpeedSetpoint, shipinfo.mass, use_angle);
+		}
+
+		if (mode==3) {
+			UpdateShipSpeeds();
+			leveler.Tick(fwdSpeed, leftSpeed,0,0);
 		}
 	}
 
@@ -870,227 +833,153 @@ public class LandingManager {
 
 	private void UpdateProfile() {
 		
-		if (surf_grav_estimator.confidence > 0.95) {
-			// If we don't know the planet from a catalog, use the estimated
-			// surface gravity
-			if (planet.identified == false) {
-				planet.g_sealevel = (float)EstimateSurfaceGravity()/9.81f;
-			}
+		if (estimator.best_confidence > 0.95) {
+			// If we don't know the planet from a catalog, use the estimated surface gravity
+			if (!planet.precise == false)
+				planet.g_sealevel = Helpers.ms2_to_g(gndGravExp);
 
 			// In any case, we need to use the estimated planet radius
-			if (mode == 1) {
-			profile.Compute((float)config.transition_altitude, shipinfo, planet, (float)surf_grav_estimator.est_radius, (float)config.accel_limit, (float)config.elec_LWR_sufficient, (float)config.LWRsafetyfactor);
-			}
+			if (mode == 1)
+				profile.Compute(config.transition_altitude+gnd_sl_offset, shipinfo, planet, estimator.best_est_radius, config.accel_limit, config.elec_LWR_sufficient, config.LWRsafetyfactor, config.vspeed_safe_limit, config.final_speed, ship.lifters);
 
-			if (mode == 2) {
-				profile.Compute((float)config.transition_altitude, shipinfo, planet, (float)surf_grav_estimator.est_radius, (float)config.accel_limit, (float)config.LWRlimit, (float)config.LWRsafetyfactor);
-			}
-		}
-	}
-
-
-	
-
-	private void UpdatePressure() {
-		// Compute atmospheric pressure
-		
-		if (ship.parachutes.Count > 0) {
-			IMyParachute PSensor = ship.parachutes[0];
-			
-			realPressure = Math.Floor( (double) PSensor.Atmosphere*100 );
+			if (mode == 2)
+				profile.Compute(config.transition_altitude+gnd_sl_offset, shipinfo, planet, estimator.best_est_radius, config.accel_limit, config.LWRlimit, config.LWRsafetyfactor, config.vspeed_safe_limit, config.final_speed, ship.lifters);
 		}
 	}
 
 	private void UpdateShipWeight() {
 		// Compute ship weight
-		
-		MyShipMass masse =  ship.ship_ctrller.CalculateShipMass();
-		shipinfo.mass = masse.TotalMass;
+		shipWeight = shipinfo.mass*grav_now;
+	}
 
-		Vector3D naturgrav = ship.ship_ctrller.GetNaturalGravity();
-		naturgraval = naturgrav.Length();
-		
-		shipweight = shipinfo.mass*naturgraval;
+	private void UpdateGrav() {
+		grav_now = ship.ship_ctrller.GetNaturalGravity().Length();
 	}
 
 	
 	private void UpdateAvailableLWR() {
-		// Compute the max available effective lift to weight ratio for
-		// - the current ship condition
-		// - maximum possible value at ground level in presence of atmosphere
-		// - maximum possible value at ground level in vacuum
 
-		current_aLWR=ComputeLiftToWeightRatio(naturgraval,shipinfo.mass,shipinfo.eff_atmo_thrust);
-		current_iLWR=ComputeLiftToWeightRatio(naturgraval,shipinfo.mass,shipinfo.eff_ion_thrust);
-		current_hLWR=ComputeLiftToWeightRatio(naturgraval,shipinfo.mass,shipinfo.eff_hydro_thrust);
+		current_aLWR=ComputeLWR(grav_now,shipinfo.mass,ship.lifters.eff_athrust);
+		current_iLWR=ComputeLWR(grav_now,shipinfo.mass,ship.lifters.eff_ithrust);
+		current_hLWR=ComputeLWR(grav_now,shipinfo.mass,ship.lifters.eff_hthrust);
 
-		max_aLWR_gnd_atmo =ComputeLiftToWeightRatio(graval_expected,shipinfo.mass,shipinfo.max_atmo_thrust);
-		max_iLWR_gnd_atmo =ComputeLiftToWeightRatio(graval_expected,shipinfo.mass,shipinfo.max_ion_thrust*0.2);
-		max_hLWR_gnd_atmo =ComputeLiftToWeightRatio(graval_expected,shipinfo.mass,shipinfo.max_hydro_thrust);
+		max_aLWR_gnd_atmo =ComputeLWR(gndGravExp,shipinfo.mass,ship.lifters.max_athrust);
+		max_iLWR_gnd_atmo =ComputeLWR(gndGravExp,shipinfo.mass,ship.lifters.max_ithrust*0.2);
+		max_hLWR_gnd_atmo =ComputeLWR(gndGravExp,shipinfo.mass,ship.lifters.max_hthrust);
 
 		max_aLWR_gnd_vacuum =0;
-		max_iLWR_gnd_vacuum =ComputeLiftToWeightRatio(graval_expected,shipinfo.mass,shipinfo.max_ion_thrust);
-		max_hLWR_gnd_vacuum =ComputeLiftToWeightRatio(graval_expected,shipinfo.mass,shipinfo.max_hydro_thrust);
-
-
+		max_iLWR_gnd_vacuum =ComputeLWR(gndGravExp,shipinfo.mass,ship.lifters.max_ithrust);
+		max_hLWR_gnd_vacuum =ComputeLWR(gndGravExp,shipinfo.mass,ship.lifters.max_hthrust);
 	}
 
-	private void UpdateMaxAllowedGravities() {
+	private void UpdateMaxGravitiesAndWarning() {
 
-		maxg_vacuum = (shipinfo.mass>0) ? (shipinfo.max_ion_thrust+shipinfo.max_hydro_thrust)/(shipinfo.mass*9.81*config.LWRsafetyfactor*(1+config.LWRoffset)) : 0;
-		maxg_atmo = (shipinfo.mass>0) ? (shipinfo.max_atmo_thrust+shipinfo.max_ion_thrust*0.2+shipinfo.max_hydro_thrust)/(shipinfo.mass*9.81*config.LWRsafetyfactor*(1+config.LWRoffset)) : 0;
+		maxGNow = (shipinfo.mass>0) ? Helpers.ms2_to_g(ship.lifters.AtmoThrustForAtmoDensity(planet.atmo_density_sealevel)+ship.lifters.IonThrustForAtmoDensity(planet.atmo_density_sealevel)+ship.lifters.max_hthrust)/(shipinfo.mass*config.LWRsafetyfactor*(1+config.LWRoffset)) : 0;
 
-		warning_vacuum = maxg_vacuum < graval_expected / 9.81;
-		warning_atmo = maxg_atmo < graval_expected / 9.81;
-
+		warningState = (maxGNow < Helpers.ms2_to_g(gndGravExp)) ? WarnType.Bad : WarnType.Good;
 	}
 
 
-	private void UpdateSpeedsp() {
+	private void UpdateSpeedSetPoint() {
 
-		// The speed set-point is computed with 4 possible methods:
-		// |Altitude							|Landing Profile			|Method
-		// |------------------------------------|---------------------------|
-		// |available & above transition		|computed & valid			|detailed profile computed by the Liftoff Profile Builder
-		// |available & above transition		|not computed or not valid	|explicit formula assuming a time-reversed take-off with constant acceleration and gravity
-		// |available & below transition		|-							|constant final speed
-		// |not available						|-							|back-up formula simply using the local gravity 
+		// See tech doc §3.1
 
-		if (gnd_altitude < 1e6) {
+		double temp_vspeed_sp;
 
-			if (gnd_altitude > config.transition_altitude) {
+		if (gndAltitude < 1e6) {
 
-				if (profile.IsValid() && config.USE_PROFILE) {
+			if (gndAltitude > config.transition_altitude) {
 
-					vspeed_sp = - profile.Interpolate((float)gnd_altitude);
-					speed_sp_source = SetPointSource.Profile;
+				if (profile.IsValid()) {
 
+					temp_vspeed_sp = - profile.InterpolateSpeed(slAltitude);
+					speedSetpointSrc = SPSource.Profile;
+
+				} else if (current_LWRtarget>1) {
+
+					temp_vspeed_sp = - Math.Sqrt(2 * (gndAltitude-config.transition_altitude) * (current_LWRtarget-1)*gndGravExp) -config.final_speed;
+					speedSetpointSrc = SPSource.AltGravFormula;
 				} else {
-
-					vspeed_sp = - Math.Sqrt(2 * (gnd_altitude-config.transition_altitude) * (current_LWRtarget-1)*graval_expected) -config.final_speed;
-					speed_sp_source = SetPointSource.AltGravFormula;
+					temp_vspeed_sp = 0;
+					speedSetpointSrc = SPSource.Unable;
 				}
 
 			} else {
 
-				vspeed_sp = -config.final_speed;
-				speed_sp_source = SetPointSource.FinalSpeed;				
+				temp_vspeed_sp = -config.final_speed;
+				speedSetpointSrc = SPSource.FinalSpeed;				
 			}
 
 		} else {
 			
-			vspeed_sp = -config.vspeed_default/(naturgraval/9.81)*(current_LWRtarget-1);
-			speed_sp_source = SetPointSource.GravFormula;
+			temp_vspeed_sp = -config.vspeed_default*(current_LWRtarget-1)/Helpers.ms2_to_g(grav_now);
+			speedSetpointSrc = SPSource.GravFormula;
 		}
 
-		// The formula for the speed set-point is derived assuming a time-reversed take-off
-		// with constant acceleration
+		temp_vspeed_sp = Helpers.NotNan(temp_vspeed_sp);
+		speed_tgt.AddValue(temp_vspeed_sp);
 
-		// Newton formula : 
-		// mass * acceleration = forces, with forces = lift - weight
-
-		// Divide by mass:
-
-		// acceleration = lift/mass - gravity
-		// acceleration = (lift/weight - 1)*gravity
-
-		// If initial altitude and speed are zero, and we assume acceleration is constant:
-
-		// speed = acceleration * time;
-		// altitude = 1/2 * acceleration * time^2
-
-		// Then solve for time as a function of altitude
-
-		// time = sqrt(2*altitude/acceleration)
-		
-		// Substitude for time in the speed formula:
-
-		// speed = acceleration * sqrt(2*altitude/acceleration)
-		// speed = sqrt(2*altitude*acceleration)
-
-		// Finally :
-
-		// speed = sqrt(2*altitude*(lift/weight - 1)*gravity)
-
-		// Because gravity, lift and weight are not actually constant, this formula provides an approximation
-		// that is more and more incorrect at high altitude and thus margins must be applied here and there so
-		// that the ship is capable of following the changes in the set-point
-
-		// If the expected LWR is less than one, the speed set point will be 0.
-
-		
-
-		
-		vspeed_sp = Helpers.NotNan(vspeed_sp);
-		vspeed_sp = Helpers.SaturateMinMaxPrioritizeMaxLimit(vspeed_sp,-config.vspeed_safe_limit,-config.final_speed);
+		vertSpeedSetpoint = Math.Max(temp_vspeed_sp, speed_tgt.Get());
+		vertSpeedSetpoint = Helpers.SatMinMax(vertSpeedSetpoint,-config.vspeed_safe_limit,-config.final_speed);
 	}
 
-	private void UpdateVertSpeed() {
-		// Update vertical velocity measurement
+	private void UpdateShipSpeeds() {
 
 		MyShipVelocities velocities = ship.ship_ctrller.GetShipVelocities();
-		Vector3D linvel = velocities.LinearVelocity;
-
+		Vector3D normlinvel = Vector3D.Normalize(velocities.LinearVelocity);
 		Vector3D normal_gravity = -Vector3D.Normalize(ship.ship_ctrller.GetNaturalGravity());
-		vspeed = Helpers.NotNan(Vector3D.Dot(linvel, normal_gravity));
+		vertSpeed = Helpers.NotNan(Vector3D.Dot(normlinvel, normal_gravity))* ship.ship_ctrller.GetShipSpeed();
+
+		fwdSpeed = Helpers.NotNan(Vector3D.Dot(normlinvel, Vector3D.Cross(normal_gravity, ship.ship_ctrller.WorldMatrix.Right)) * ship.ship_ctrller.GetShipSpeed());
+		leftSpeed = Helpers.NotNan(Vector3D.Dot(normlinvel, Vector3D.Cross(normal_gravity, ship.ship_ctrller.WorldMatrix.Forward)) * ship.ship_ctrller.GetShipSpeed());
+
 	}
 
 	private void UpdateAltitude() {
 
-		// Update ship altitude (distance from surface) by combining altitude from controller (as shown on HUD)
-		// and radar (raytracing from ground-facing camera) as follows:
+		// See tech doc §4.1
 
-		// Altitude from controller			Altitude from radar			Method
-		// ----------------------------------------------------
-		// available & above transition		-							Use altitude from surface
-		// available & below transition		available					Use radar altitude
-		// available & below transition		not available				Use altitude from surface
-		// not available					available					Use radar altitude
-		// not available					not available				default value (1e6)
+		double ctrller_alt_surf, radar_alt;
 
-		double altitude_from_ctrller;
-		double altitude_radar;
-
-		bool altitude_from_ctrller_valid = ship.ship_ctrller.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude_from_ctrller);
+		bool ctrller_alt_surf_valid = ship.ship_ctrller.TryGetPlanetElevation(MyPlanetElevation.Surface, out ctrller_alt_surf);
 		
-		if (altitude_from_ctrller_valid == true && altitude_from_ctrller > config.transition_altitude) {
+		if (radar.exists && radar.valid) {
 
-			// If we can get the altitude to surface and it is high enough, use it
-			// (if the ship is not level and performing attitude adjustments, then the
-			// radar return is not directly below)
+			radar_alt = radar.GetDistance();
 
-			gnd_altitude = altitude_from_ctrller;
-			altitude_source = "surface";
+			if (ctrller_alt_surf_valid) {
+				if (radar.alt_age <= 1) 
+					radar_offset = radar_alt-ctrller_alt_surf;
+				alt_filt.AddValue(ctrller_alt_surf+radar_offset);
+			} else {
+				alt_filt.AddValue(radar_alt);
+			}
+			gndAltitude = alt_filt.Get();
+			altSrc = AltSource.Radar;
+		
+		} else if (ctrller_alt_surf_valid) {
 
-		} else if (radar_valid == true && (radar_return.Type ==  MyDetectedEntityType.Planet || radar_return.Type == MyDetectedEntityType.LargeGrid) && radar_return.HitPosition.HasValue) {
-
-			// Use radar+inertial navigation in the following cases:
-			// - too high for TryGetPlanetElevation to return a result
-			// - below the transition altitude (in case the landing surface is not at planet surface, ex: landing pad, silo, etc.)
-
-			hitpos = radar_return.HitPosition.Value; // Updated when the radar has a return
-			mypos = ship.ship_ctrller.GetPosition(); // Always updated
-
-			altitude_radar=VRageMath.Vector3D.Distance(hitpos,mypos);
-
-			gnd_altitude = altitude_radar;
-			altitude_source = "radar";
-
-		} else if (altitude_from_ctrller_valid == true) {
-
-			// No radar return, but at least an altitude value
-
-			gnd_altitude = altitude_from_ctrller;
-			altitude_source = "surface";
+			gndAltitude = ctrller_alt_surf;
+			altSrc = AltSource.Ground;
 
 		} else {
 
-			// No altitude available at all, use a default huge value
-			gnd_altitude = 1e6;
-			altitude_source = "unavailable";
+			gndAltitude = 1e6;
+			altSrc = AltSource.Undefined;
 		}
 
-		gnd_altitude = gnd_altitude - config.altitude_offset;
+		gndAltitude -= config.altitudeOffset;
+
+		// Update the altitude offset from the ground to the sea level
+
+		double ctrller_alt_sl;
+
+		bool ctrller_alt_sl_valid = ship.ship_ctrller.TryGetPlanetElevation(MyPlanetElevation.Sealevel, out ctrller_alt_sl);
+
+		gnd_sl_offset = (ctrller_alt_sl_valid && ctrller_alt_surf_valid) ? ctrller_alt_sl - ctrller_alt_surf : config.defaultASLmeters;
+
+		slAltitude = gndAltitude + gnd_sl_offset;
+
 	}
 
 	
@@ -1102,31 +991,86 @@ public class LandingManager {
 		// for the current conditions as well as expected conditions
 		// on the planet surface
 		
-		current_LWRtarget = ComputeLWRTarget(naturgraval, mode, current_aLWR, current_iLWR, current_hLWR, config.elec_LWR_sufficient, config.elec_LWR_start, config.LWRsafetyfactor, config.LWRoffset, config.LWRlimit);
+		double LWRtarget_here = ComputeLWRTarget(grav_now, mode, current_aLWR, current_iLWR, current_hLWR);
 		
-		ground_LWRtarget_vacuum = ComputeLWRTarget(graval_expected, mode, max_aLWR_gnd_vacuum, max_iLWR_gnd_vacuum, max_hLWR_gnd_vacuum, config.elec_LWR_sufficient, config.elec_LWR_start, config.LWRsafetyfactor, config.LWRoffset, config.LWRlimit);
+		double gnd_LWRtarget_vacuum = ComputeLWRTarget(gndGravExp, mode, max_aLWR_gnd_vacuum, max_iLWR_gnd_vacuum, max_hLWR_gnd_vacuum);
 	
-		ground_LWRtarget_atmo = ComputeLWRTarget(graval_expected, mode, max_aLWR_gnd_atmo, max_iLWR_gnd_atmo, max_hLWR_gnd_atmo, config.elec_LWR_sufficient, config.elec_LWR_start, config.LWRsafetyfactor, config.LWRoffset, config.LWRlimit);
+		double gnd_LWRtarget_atmo = ComputeLWRTarget(gndGravExp, mode, max_aLWR_gnd_atmo, max_iLWR_gnd_atmo, max_hLWR_gnd_atmo);
 
-		// The LWR target used to compute the speed target will be a mix of the
-		// target at the current conditions and at ground conditions.
+		double gnd_LWR_target = planet.ignore_atmo ? Math.Min(gnd_LWRtarget_vacuum,gnd_LWRtarget_atmo) : Helpers.Interpolate(0.2, 0.8, gnd_LWRtarget_vacuum, gnd_LWRtarget_atmo, planet.atmo_density_sealevel);
 
-		// If the pilot selected a planet type (with atmosphere or vacuum) we use only
-		// this one, otherwise we mix the two possibilities.
+		current_LWRtarget = Helpers.Mix(gnd_LWR_target,LWRtarget_here,config.LWR_mix_gnd_ratio);
+	}
 
-		if (planet.ignore_atmo) {
+	private void UpdatePlanetAtmo() {
 
-			current_LWRtarget = (1-config.LWR_mix_surf_ratio)*current_LWRtarget + 0.5*config.LWR_mix_surf_ratio*ground_LWRtarget_vacuum + 0.5*config.LWR_mix_surf_ratio*ground_LWRtarget_atmo;
+		// Estimate outside atmo density and update the planet
+		// object with the best guess unless a precise planet is defined
 
-		} else if (planet.atmo_density_sealevel > 0.8) {
+		double parachute_density = (ship.parachutes.Count > 0 && ship.parachutes[0].Atmosphere > 0.01) ? (double) ship.parachutes[0].Atmosphere : -1;
+		double athrusters_density = (ship.lifters.max_athrust > 0 && ship.lifters.eff_athrust > 1) ? ship.lifters.eff_athrust/ship.lifters.max_athrust*0.7+0.3 : -1;
+		double ithrusters_density = (ship.lifters.max_ithrust > 0 && ship.lifters.eff_ithrust > 1) ? (1-ship.lifters.eff_ithrust/ship.lifters.max_ithrust)/0.8 : -1;
+		observed_density = Helpers.Max3(parachute_density, athrusters_density,ithrusters_density);
 
-			current_LWRtarget = (1-config.LWR_mix_surf_ratio)*current_LWRtarget + config.LWR_mix_surf_ratio*ground_LWRtarget_atmo;
+		bool found;
+		// If disabled at high altitude, we need to set the planet to unknown
+		if (mode == 0 && gndAltitude > 10000)
+			planet = catalog.get_planet("unknown", out found);
 
-		} else if (planet.atmo_density_sealevel < 0.2) {
+		if (planet.precise == false) {
 
-			current_LWRtarget = (1-config.LWR_mix_surf_ratio)*current_LWRtarget + config.LWR_mix_surf_ratio*ground_LWRtarget_vacuum;
+			if (planet.shortname == "unknown") planet.atmo_density_sealevel = ship.lifters.WorstDensity();
+
+			if (planet.shortname == "atmo") planet.atmo_density_sealevel = Math.Max(planet.atmo_density_sealevel, ship.lifters.WorstDensity());
+
+			if (observed_density > -1) {
+				if (observed_density > 0.2 && gndAltitude < 10000) {
+					planet = catalog.get_planet("dynatmo", out found);
+					planet.atmo_density_sealevel = Math.Max(observed_density,ship.lifters.WorstDensity());
+				}
+
+				if (observed_density < 0.2 && gndAltitude < 1000) {
+					planet = catalog.get_planet("dynvacuum", out found);
+				}
+			}
 		}
 	}
+
+	// Estimates the surface gravity with what's available and return the value in m/s²
+	private void ComputeSurfaceGravityEstimate() {
+
+		if (planet.precise) {
+			gravSrc = GravSource.Identified;
+			gndGravExp = Helpers.g_to_ms2(planet.g_sealevel);
+
+		} else {
+
+			double weighted_ground_estimate = Helpers.Interpolate(0,1, grav_now, estimator.best_est_gravity, estimator.best_confidence);
+			gravSrc = (estimator.best_confidence > 0.9) ? GravSource.Estimate : GravSource.Undefined;
+			gndGravExp = Math.Max(grav_now, Helpers.Interpolate(config.gravTransitionLow, config.gravTransitionHigh, grav_now, weighted_ground_estimate, gndAltitude));
+			planet.g_sealevel = Helpers.ms2_to_g(gndGravExp);
+		}
+	}
+
+	public void EnableLeveler() {
+		level = true;
+		leveler.Enable();
+	}
+
+	public void DisableLeveler() {
+		level = false;
+		leveler.Disable();
+	}
+
+	public void SwitchLeveler() {
+		level = !level;
+		if (level) {
+			leveler.Enable();
+		} else {
+			leveler.Disable();
+		}
+	}
+
 
 	// ------------------------------
 	// PRIVATE METHODS WITH SIDE-EFFECTS ON THE SHIP
@@ -1134,500 +1078,502 @@ public class LandingManager {
 	// ------------------------------
 
 	private void DisableRadar() {
-		if (ship.ship_has_radar) {
-			ship.radar.EnableRaycast = false;
-		}
+		radar.DisableRadar();
 	}
 
 	private void StartRadar() {
-		radar_range = 1000;
-		if (ship.ship_has_radar) {
-			ship.radar.EnableRaycast = true;
-		}
+		radar.StartRadar();
 	}
 
 	// Setup the LCDs (display type, font size etc.)
 	private void SetUpLCDs() {
 
-		foreach (IMyTextPanel maindisplay in ship.SLM_displays) {
-			
-			maindisplay.Enabled = true;
-			maindisplay.ContentType = ContentType.TEXT_AND_IMAGE;
-			maindisplay.Font = "Monospace";
-			maindisplay.FontColor = VRageMath.Color.White;
-			maindisplay.FontSize = 0.8f;
+		foreach (IMyTextPanel d in ship.MainDisplays) {
+			d.Enabled = true;
+			d.ContentType = ContentType.SCRIPT;
+			d.ScriptBackgroundColor=VRageMath.Color.Black;
 		}
 
-		foreach (IMyTextPanel debugdisplay in ship.SLM_debug) {
-			
-			debugdisplay.Enabled = true;
-			debugdisplay.ContentType = ContentType.TEXT_AND_IMAGE;
-			debugdisplay.Font = "Monospace";
-			debugdisplay.FontColor = VRageMath.Color.White;
-			debugdisplay.FontSize = 0.6f;
+		foreach (IMyTextPanel d in ship.DebugDisplays) {
+			d.Enabled = true;
+			d.ContentType = ContentType.TEXT_AND_IMAGE;
+			d.Font = "Monospace";
+			d.FontColor = VRageMath.Color.White;
+			d.FontSize = 0.6f;
 		}
 
-		foreach (IMyTextPanel graphdisplay in ship.SLM_graph) {
-			
-			graphdisplay.Enabled = true;
-			graphdisplay.ContentType = ContentType.SCRIPT;
-			graphdisplay.BackgroundColor=VRageMath.Color.Black;
-		}
-	}
-
-	private void Disable_Override() {
-
-		foreach (IMyThrust alifter in ship.aero_lifters) {
-			alifter.ThrustOverridePercentage = -1;
-		}   
-
-		foreach (IMyThrust ilifter in ship.ion_lifters) {
-			ilifter.ThrustOverridePercentage = -1;
-		} 		
-
-		foreach (IMyThrust hlifter in ship.h2_lifters) {
-			hlifter.ThrustOverridePercentage =  -1;  
-		} 
-	}
-
-	private void UpdateDisplays() {
-
-		double current_a_relthrust = shipinfo.current_atmo_thrust/shipinfo.mass;
-		double current_i_relthrust = shipinfo.current_ion_thrust/shipinfo.mass;
-		double current_h_relthrust = shipinfo.current_hydro_thrust/shipinfo.mass;
-		
-		double eff_a_relthrust = shipinfo.eff_atmo_thrust/shipinfo.mass;
-		double eff_i_relthrust = shipinfo.eff_ion_thrust/shipinfo.mass;
-		double eff_h_relthrust = shipinfo.eff_hydro_thrust/shipinfo.mass;
-
-		string ATMO_SQUARE = Helpers.ColorToChar(100,255,100).ToString();
-		string ION_SQUARE = Helpers.ColorToChar(100,100,255).ToString();
-		string HYDRO_SQUARE = Helpers.ColorToChar(255,100,100).ToString();
-
-		UpdateMaxAllowedGravities();
-
-		foreach (IMyTextPanel maindisplay in ship.SLM_displays) {
-
-			maindisplay.FontColor = VRageMath.Color.White;
-
-			if (marginal) {
-				maindisplay.FontColor = VRageMath.Color.Yellow;
-			}
-
-			if (planet.ignore_atmo == true & (warning_atmo | warning_vacuum) 
-				| planet.atmo_density_sealevel < 0.2 & warning_vacuum
-				| planet.atmo_density_sealevel > 0.8 & warning_atmo) {
-				maindisplay.FontColor = VRageMath.Color.Orange;
-			}
-
-			if (panic) {
-				maindisplay.FontColor = VRageMath.Color.Red;
-			}
-
-			// Info displayed in all modes
-
-			maindisplay.WriteText("SOFT LANDING MANAGER");
-			maindisplay.WriteText("\n---------------",true);
-			
-			
-			maindisplay.WriteText("\nGravity now :" + Math.Round(naturgraval/9.81,2).ToString("0.00") +"g", true);
-			if (planet.identified == true) {
-				maindisplay.WriteText("\nSurface grav:" + Math.Round(Helpers.ms2_to_g(graval_expected),2).ToString("0.00") + "g (known)",true);
-			} else if (surf_grav_estimator.confidence > 0.8) {
-				maindisplay.WriteText("\nSurface grav:" + Math.Round(Helpers.ms2_to_g(graval_expected),2).ToString("0.00") + "g (estim)",true);
-			} else if (surf_grav_estimator.confidence > 0.2) {
-				maindisplay.WriteText("\nSurface grav:" + Math.Round(Helpers.ms2_to_g(graval_expected),2).ToString("0.00") + "g (low conf.)",true);
-			} else if (gnd_altitude < config.grav_est_altitude_transition_end) {
-				maindisplay.WriteText("\nSurface grav:" + Math.Round(Helpers.ms2_to_g(graval_expected),2).ToString("0.00") + "g (here)",true);
-			} else {
-				maindisplay.WriteText("\nSurface gravity unknown",true);
-			}
-
-			maindisplay.WriteText("\n",true);
-
-			maindisplay.WriteText("\n"+ship.ship_ctrller.CubeGrid.DisplayName+" info:",true);
-			maindisplay.WriteText("\nTotal mass: " + Math.Round(shipinfo.mass) + "kg", true);
-			maindisplay.WriteText("\nMax: " + Math.Round(maxg_vacuum,2).ToString("0.00") + "g (vac), "+Math.Round(maxg_atmo,2).ToString("0.00")+"g (atmo)", true);
-
-			maindisplay.WriteText("\n",true);
-
-			if (gnd_altitude < 1e6) {
-				maindisplay.WriteText("\nAltitude: " +  Math.Round(gnd_altitude,1).ToString("+000000.0") + " " + altitude_source, true);
-			} else {
-				maindisplay.WriteText("\nAltitude unknown", true);
-			}
-
-			if (!ship.ship_has_radar) {
-				maindisplay.WriteText("(no radar!)", true);
-			}
-
-			// Mode indicator
-
-			if (mode == 0) {
-				maindisplay.WriteText("\nMode 0 - DISABLED", true);
-			} else if (mode == 1) {
-				maindisplay.WriteText("\nMode 1", true);
-			} else if (mode == 2) {
-				maindisplay.WriteText("\nMode 2", true);
-			}
-
-			// Additional info when active
-
-			if (mode == 1 | mode == 2) {
-				maindisplay.WriteText(" - " + planet.name, true);
-
-				switch (speed_sp_source) {
-					case SetPointSource.None:
-						maindisplay.WriteText("\nNot active", true);
-						break;
-
-					case SetPointSource.Profile:
-						maindisplay.WriteText("\nFollowing descent profile", true);
-						break;
-
-					case SetPointSource.AltGravFormula:
-						maindisplay.WriteText("\nAltitude/gravity formula", true);
-						break;
-
-					case SetPointSource.GravFormula:
-						maindisplay.WriteText("\nGravity formula", true);
-						break;
-
-					case SetPointSource.FinalSpeed:
-						maindisplay.WriteText("\nFinal landing speed", true);
-						break;
-
-					default:
-						break;
-				}
-		
-				maindisplay.WriteText("\nV Speed: " +  Math.Round(vspeed,1).ToString("000.0") + ", tgt: "+Math.Round(vspeed_sp,1).ToString("000.0"), true);
-				
-				maindisplay.WriteText("\nAvail:",true);
-				
-				for (int i=0; i<eff_a_relthrust/2; i=i+1) {
-					maindisplay.WriteText(ATMO_SQUARE, true);
-				}
-				for (int i=0; i<eff_i_relthrust/2; i=i+1) {
-					maindisplay.WriteText(ION_SQUARE, true);
-				}
-				for (int i=0; i<eff_h_relthrust/2; i=i+1) {
-					maindisplay.WriteText(HYDRO_SQUARE, true);
-				}
-				
-				maindisplay.WriteText("\nUsed :",true);
-				
-				for (int i=0; i<current_a_relthrust/2; i=i+1) {
-					maindisplay.WriteText(ATMO_SQUARE, true);
-				}
-				for (int i=0; i<current_i_relthrust/2; i=i+1) {
-					maindisplay.WriteText(ION_SQUARE, true);
-				}
-				for (int i=0; i<current_h_relthrust/2; i=i+1) {
-					maindisplay.WriteText(HYDRO_SQUARE, true);
-				}
-			}
-		}
 	}
 
 	public void UpdateDebugDisplays() {
 
-		foreach (IMyTextPanel debugdisplay in ship.SLM_debug) {
+		foreach (IMyTextPanel d in ship.DebugDisplays) {
 
-			// Additional information for debug mode
-
-			debugdisplay.WriteText("-- SLM debug --");
-			debugdisplay.WriteText("\nOutside Pressure: " + realPressure + "%", true);
-			if (naturgraval>0) {
-				debugdisplay.WriteText("\nAvailable LWR now:",true);
-				debugdisplay.WriteText("\nAtmo:" + Math.Round(current_aLWR,2).ToString("0.00") + " Ion:" + Math.Round(current_iLWR,2).ToString("0.00")+ " H2:" + Math.Round(current_hLWR,2).ToString("0.00") + " Total:" + Math.Round(current_aLWR+current_iLWR+current_hLWR,2).ToString("0.00"), true); 
-			}
-			
-			debugdisplay.WriteText("\n[Speed target computation]", true);
-			debugdisplay.WriteText("\nLWR target now    : " + Math.Round(current_LWRtarget,2), true);
-
-			debugdisplay.WriteText("\n[Surface gravity estimator]", true);
-			debugdisplay.WriteText("\nEstim radius:"+Math.Round(surf_grav_estimator.est_radius,0).ToString("000000")+" grav:"+Math.Round(surf_grav_estimator.est_gravity,2).ToString("0.00")+", confid:"+Math.Round(surf_grav_estimator.confidence,2),true);
-			
-			debugdisplay.WriteText("\n[Radar]", true);
-			debugdisplay.WriteText("\nRange:" + Math.Round(radar_range) + ", avail:" + Math.Round(radar_avail_range),true);
-			debugdisplay.WriteText("\nDistance @return:" + Math.Round(radar_distance) +",now:"+ Math.Round(Vector3D.Distance(ship.ship_ctrller.GetPosition(),radar_return.Position)),true);
-			debugdisplay.WriteText("\nReturn type: " + radar_return.Type,true);
-
-			
-			debugdisplay.WriteText("\n[PID]", true);
-			debugdisplay.WriteText("\nP: " +  Math.Round(PID.ap,2).ToString("+0.00;-0.00") + " I:" + Math.Round(PID.ai,2).ToString("+0.00;-0.00") +" D:"+Math.Round(PID.ad,2).ToString("+0.00;-0.00"),true);
-			
-			debugdisplay.WriteText("\n[Thrust wanted]", true);
-			debugdisplay.WriteText("\nThr wanted:   " + Math.Round(debug_tr_wanted), true);
-			debugdisplay.WriteText("\nA: " + Math.Round(debug_atr_wanted).ToString("000000"), true);
-			debugdisplay.WriteText(",I: " + Math.Round(debug_itr_wanted).ToString("000000"), true);
-			debugdisplay.WriteText(",H: " + Math.Round(debug_htr_wanted).ToString("000000"), true);
-
-			debugdisplay.WriteText("\n[Thrust overrides]", true);
-			debugdisplay.WriteText("\nAtmo:" +Math.Round(atmo_override,2).ToString("+0.00;-0.00")+ " Ion:" +Math.Round(ion_override,2).ToString("+0.00;-0.00") + " H2:" +Math.Round(h2_override,2).ToString("+0.00;-0.00"),  true);
-			
-			debugdisplay.WriteText("\n[Speed profile]", true);
-			debugdisplay.WriteText("\nValid:"+ profile.IsValid().ToString() + ",final_alt"+profile.GetFinalAlt().ToString("00000") + "speed:"+ profile.GetFinalSpeed().ToString("0000"), true);
-			debugdisplay.WriteText("\nAlt  ;speed", true);
-			debugdisplay.WriteText("\n"+profile.alt_sl[0].ToString("000.0") +";"+profile.vert_speed[0].ToString("000.0"), true);
-			debugdisplay.WriteText("\n"+profile.alt_sl[1].ToString("000.0") +";"+profile.vert_speed[1].ToString("000.0"), true);
-			debugdisplay.WriteText("\n"+profile.alt_sl[2].ToString("000.0") +";"+profile.vert_speed[2].ToString("000.0"), true);
-			debugdisplay.WriteText("\n"+profile.alt_sl[3].ToString("000.0") +";"+profile.vert_speed[3].ToString("000.0"), true);
-			debugdisplay.WriteText("\n"+profile.alt_sl[4].ToString("000.0") +";"+profile.vert_speed[4].ToString("000.0"), true);
-
+			// Compact debug info
+			var sb = new StringBuilder();
+			sb.AppendLine("-- SLM debug --");
+			sb.AppendLine(runTime.RunTimeString());
+			sb.AppendLine($"Density: {observed_density:0.00} (cat){planet.atmo_density_sealevel:0.00}");
+			sb.AppendLine(shipinfo.DebugString());
+			sb.AppendLine($"LWR tgt: {current_LWRtarget:0.00}");
+			sb.AppendLine($"Alt: {slAltitude:0.0}, SL offset {gnd_sl_offset:000}m");
+			sb.AppendLine(leveler.DebugString());
+			sb.AppendLine(estimator.DebugString());
+			sb.AppendLine(radar.AltitudeDebugString());
+			sb.AppendLine(radar.TerrainDebugString());
+			sb.AppendLine("[VERT PID] " + vert_PID.DebugString());
+			sb.AppendLine(ship.lifters.DebugString());
+			sb.AppendLine(horizThrusters.DebugString());
+			sb.AppendLine(profile.DebugString());
+			d.WriteText(sb.ToString());
 		}
 
 	}
 
-	public void UpdateGraphDisplays() {
+	// Update the main displays
+	public void UpdateDisplays() {
 
-		foreach (IMyTextPanel graphdisplay in ship.SLM_graph) {
+		const float PTOP = 70, PLEFT = 150, PRIGHT = 30, PLMARGIN = 5, PTMARGIN = 5, PBMARGIN = 35;
+		const float HMAX = 20, HSCALE = 2, LEFT_MARGIN = 40, THR_CUR_W = 20, THR_MAX_W = 5, THR_SW_W = 5;
+		
+		foreach (IMyTextPanel d in ship.MainDisplays) {
 
-			//graphdisplay.WriteText("\n[PID]", true);
+			VRageMath.RectangleF view;
 
-			//IMyTextSurface _drawingSurface;
-			
-			//_drawingSurface = graphdisplay.GetSurface(0);
-			IMyTextSurface _drawingSurface;
-			VRageMath.RectangleF _viewport;
-			float width;
-			float height;
-			float speed;
-			float speed_scale;
-			float alt_scale;
-			string alt_scale_legend;
+			float speed, speed_scale, alt_scale, xpos, ypos;
 
-
-			if (gnd_altitude < 3000) {
-				speed_scale = 0.8f;
-				alt_scale=8;
-				alt_scale_legend = "Final stage";
-			} else if (gnd_altitude < 10000) {
-				speed_scale = 1.4f;
-				alt_scale=22;
-				alt_scale_legend = "Medium altitude stage";
-			} else {
-				speed_scale = 1.4f;
-				alt_scale=120;
-				alt_scale_legend = "High altitude stage";
-			}
-
-			_drawingSurface = graphdisplay;
-
-			_viewport = new VRageMath.RectangleF(
-				(_drawingSurface.TextureSize - _drawingSurface.SurfaceSize) / 2f,
-				_drawingSurface.SurfaceSize
+			view = new VRageMath.RectangleF(
+				(d.TextureSize - d.SurfaceSize) / 2f,
+				d.SurfaceSize
 			);
 
-			width=_drawingSurface.SurfaceSize[0];
-			height=_drawingSurface.SurfaceSize[1];
+			// Adapt drawing to screen size
 
-			var frame = graphdisplay.DrawFrame();
+			float width=d.SurfaceSize[0];
+			float height=d.SurfaceSize[1];
 
-			if (profile.IsValid() && profile.IsComputed()) {
+			// SPEED PROFILE
 
-				// Draw the profile with white crosses
+			float PBOTTOM=height-112;
+			float THR_SCALE=(PBOTTOM-PTOP)/40; //px/(m/s²)
 
-				for (int i=0; i<profile.alt_sl.Count()-1;i++) {
+			
+			float HHOR=width-PRIGHT-HMAX*HSCALE;
+			float HVER = PBOTTOM+HMAX*HSCALE+20;
 
+			if (gndAltitude < 1600) {
+				speed_scale = 300/(width-PLEFT-PRIGHT);
+				alt_scale=2000/(PBOTTOM-PTOP);
+			} else if (gndAltitude < 6400) {
+				speed_scale = 400/(width-PLEFT-PRIGHT);
+				alt_scale=8000/(PBOTTOM-PTOP);
+			} else if (gndAltitude < 25600) {
+				speed_scale = 550/(width-PLEFT-PRIGHT);
+				alt_scale=32000/(PBOTTOM-PTOP);
+			} else {
+				speed_scale = 550/(width-PLEFT-PRIGHT);
+				alt_scale=200000/(PBOTTOM-PTOP);
+			}
 
-					speed = Math.Min(profile.vert_speed[i],(float)config.vspeed_safe_limit);
+			var frame = d.DrawFrame();
 
-					var sprite_profile_point = new MySprite()
-					{
-						Type = SpriteType.TEXT,
-						Data = "+",
-						Position = new Vector2(width-speed/speed_scale-30,height-(profile.alt_sl[i]/alt_scale+50)) + _viewport.Position,
-						RotationOrScale = 2f ,
-						Color = VRageMath.Color.White,
-						Alignment = TextAlignment.CENTER /* Center the text on the position */,
-						FontId = "White"
-					};
-					// Add the sprite to the frame
-					frame.Add(sprite_profile_point);
+			if (mode == 1 || mode == 2) {
+				if (profile.IsValid() && profile.IsComputed()) {
+
+					// Draw the profile with crosses
+
+					for (int i=0; i<profile.alt_sl.Count()-1;i++) {
+
+						speed = (float)Math.Min(profile.vert_speed[i],config.vspeed_safe_limit);
+
+						ypos = PBOTTOM-70-((float)(profile.alt_sl[i]-gnd_sl_offset)/alt_scale);
+						xpos = width-PRIGHT-20-speed/speed_scale;
+
+						if (ypos >= PTOP && xpos >= PLEFT) {
+							
+							frame.Add(new MySprite()
+							{
+								Type = SpriteType.TEXT,
+								Data = "+",
+								Position = new Vector2(xpos, ypos) + view.Position,
+								RotationOrScale = 1.5f ,
+								Color = new VRageMath.Color((float)profile.hratio[i],(float)profile.aratio[i],(float)profile.iratio[i]),
+								Alignment = TextAlignment.CENTER,
+								FontId = "White"
+							});
+						}
+					}
+
+					// H2 margin
+
+					double h2_capa = shipinfo.H2_capa_liters();
+
+					if (h2_capa > 0 && ship.lifters.max_hthrust > 0) {
+						double h2_to_use = profile.InterpolateH2Used(slAltitude)/h2_capa*100;
+						double h2_stored = shipinfo.H2_stored_liters()/h2_capa*100;
+						double h2_margin = h2_stored-h2_to_use;
+
+						frame.Add(TextSprite(
+							"H2 Margin : "+h2_margin.ToString("00")+"%",
+							width-PRIGHT-200,
+							PTOP+PTMARGIN,
+							view,
+							(h2_margin > config.h2_margin_warning) ? VRageMath.Color.White : VRageMath.Color.Red,
+							TextAlignment.LEFT));
+					}
+
+					if (panic) {
+						frame.Add(new MySprite()
+						{
+							Type = SpriteType.TEXT,
+							Data = "PANIC",
+							Position = new Vector2(width/2,170) + view.Position,
+							RotationOrScale = 2f ,
+							Color = VRageMath.Color.Red,
+							FontId = "White"
+						});
+					}
+
+					// Legend
+
+					frame.Add(TextSprite(
+						((width-PRIGHT-PLEFT)*speed_scale).ToString("000") + "m/s",
+						PLEFT+PLMARGIN,
+						PBOTTOM-PBMARGIN,
+						view,
+						VRageMath.Color.Gray,
+						TextAlignment.LEFT));
+
+					frame.Add(TextSprite(
+						((PBOTTOM-PTOP)*alt_scale).ToString("000") + "m",
+						PLEFT+PLMARGIN,
+						PTOP+PTMARGIN,
+						view,
+						VRageMath.Color.Gray,
+						TextAlignment.LEFT));
+
+				} else if (profile.IsComputed()) {
+
+					List<string> prof_warn = new List<string> {"Unable to compute", "valid landing profile"};
+
+					for (int i=0;i < prof_warn.Count;i++) {
+						frame.Add(TextSprite(
+							prof_warn[i],
+							(PLEFT+width-PRIGHT)/2,
+							PTOP+i*20,
+							view,
+							VRageMath.Color.Orange,
+							TextAlignment.CENTER));
+					}
+
+				} else {
+
+					frame.Add(TextSprite(
+						"No profile computed",
+						(PLEFT+width-PRIGHT)/2,
+						PTOP+25,
+						view,
+						VRageMath.Color.White,
+						TextAlignment.CENTER));
 				}
+			} else {
+				List<string> strinfo = new List<string> {Helpers.Truncate(ship.ship_ctrller.CubeGrid.DisplayName,20), Math.Round(shipinfo.mass) + "kg"};
+				for (int i=0;i < strinfo.Count;i++) {
+					frame.Add(TextSprite(
+						strinfo[i],
+						PLEFT+5,
+						PTOP+5+i*20,
+						view,
+						VRageMath.Color.Gray,
+						TextAlignment.LEFT));
+					}
+			}
 
-				// Red marker for the current altitude/speed
+			// Yellow marker for the current altitude/speed
 
-				var sprite_red_marker = new MySprite()
+			ypos = PBOTTOM-70-(float)gndAltitude/alt_scale;
+			xpos = width-PRIGHT-20+(float)vertSpeed/speed_scale;
+
+			if (speedSetpointSrc == SPSource.Profile && ypos >= PTOP && xpos >= PLEFT) {
+				frame.Add(new MySprite()
 				{
 					Type = SpriteType.TEXT,
 					Data = "O",
-					Position = new Vector2(width+(float)vspeed/speed_scale-30,(float)(height-(gnd_altitude/alt_scale+50))) + _viewport.Position,
+					Position = new Vector2(xpos,ypos) + view.Position,
 					RotationOrScale = 2f ,
-					Color = VRageMath.Color.Red,
-					Alignment = TextAlignment.CENTER /* Center the text on the position */,
+					Color = VRageMath.Color.Yellow,
+					Alignment = TextAlignment.CENTER,
 					FontId = "White"
-				};
-				frame.Add(sprite_red_marker);
-
-				var sprite_scale_legend = new MySprite()
-				{
-					Type = SpriteType.TEXT,
-					Data = alt_scale_legend,
-					Position = new Vector2(width/2,50) + _viewport.Position,
-					RotationOrScale = 1f ,
-					Color = VRageMath.Color.White,
-					Alignment = TextAlignment.CENTER /* Center the text on the position */,
-					FontId = "White"
-				};
-				frame.Add(sprite_scale_legend);
-
-				if (panic) {
-					var sprite_panic = new MySprite()
-					{
-						Type = SpriteType.TEXT,
-						Data = "PANIC",
-						Position = new Vector2(width/2,100) + _viewport.Position,
-						RotationOrScale = 2f ,
-						Color = VRageMath.Color.Red,
-						Alignment = TextAlignment.CENTER /* Center the text on the position */,
-						FontId = "White"
-					};
-					frame.Add(sprite_panic);
-				}
-
-
-
-
-			} else if (profile.IsComputed() && mode != 0) {
-
-				var sprite_novalid1 = new MySprite()
-				{
-					Type = SpriteType.TEXT,
-					Data = "--- WARNING ---",
-					Position = new Vector2(width/2,80) + _viewport.Position,
-					RotationOrScale = 1.5f ,
-					Color = VRageMath.Color.Red,
-					Alignment = TextAlignment.CENTER /* Center the text on the position */,
-					FontId = "White"
-				};
-				frame.Add(sprite_novalid1);
-
-				var sprite_novalid2 = new MySprite()
-				{
-					Type = SpriteType.TEXT,
-					Data = "Ship unable to land safely",
-					Position = new Vector2(width/2,130) + _viewport.Position,
-					RotationOrScale = 1f ,
-					Color = VRageMath.Color.Red,
-					Alignment = TextAlignment.CENTER /* Center the text on the position */,
-					FontId = "White"
-				};
-				frame.Add(sprite_novalid2);
-
-				var sprite_novalid3 = new MySprite()
-				{
-					Type = SpriteType.TEXT,
-					Data = "for expected surface conditons !",
-					Position = new Vector2(width/2,150) + _viewport.Position,
-					RotationOrScale = 1f ,
-					Color = VRageMath.Color.Red,
-					Alignment = TextAlignment.CENTER /* Center the text on the position */,
-					FontId = "White"
-				};
-				frame.Add(sprite_novalid3);
-
-				var sprite_novalid4 = new MySprite()
-				{
-					Type = SpriteType.TEXT,
-					Data = "Abort landing or manually select",
-					Position = new Vector2(width/2,170) + _viewport.Position,
-					RotationOrScale = 1f ,
-					Color = VRageMath.Color.White,
-					Alignment = TextAlignment.CENTER /* Center the text on the position */,
-					FontId = "White"
-				};
-				frame.Add(sprite_novalid4);
-
-				var sprite_novalid5 = new MySprite()
-				{
-					Type = SpriteType.TEXT,
-					Data = "planet or surface atmospheric conditons.",
-					Position = new Vector2(width/2,190) + _viewport.Position,
-					RotationOrScale = 1f ,
-					Color = VRageMath.Color.White,
-					Alignment = TextAlignment.CENTER /* Center the text on the position */,
-					FontId = "White"
-				};
-				frame.Add(sprite_novalid5);
-
-
-			} else {
-
-				var sprite_noprofile = new MySprite()
-				{
-					Type = SpriteType.TEXT,
-					Data = "No profile computed",
-					Position = new Vector2(width/2,120) + _viewport.Position,
-					RotationOrScale = 1f ,
-					Color = VRageMath.Color.White,
-					Alignment = TextAlignment.CENTER /* Center the text on the position */,
-					FontId = "White"
-				};
-				frame.Add(sprite_noprofile);
+				});
 			}
 
-			var sprite_title = new MySprite()
-			{
-				Type = SpriteType.TEXT,
-				Data = "Soft Landing Manager - descent profile",
-				Position = new Vector2(width/2,30) + _viewport.Position,
-				RotationOrScale = 1f ,
-				Color = VRageMath.Color.White,
-				Alignment = TextAlignment.CENTER /* Center the text on the position */,
-				FontId = "White"
-			};
-			frame.Add(sprite_title);
+			frame.Add(TextSprite(
+				Helpers.FormatCompact(-vertSpeed) + "m/s",
+				(PLEFT+width-PRIGHT)/2,
+				PBOTTOM-PBMARGIN,
+				view,
+				VRageMath.Color.Yellow,
+				TextAlignment.CENTER));
 
-			var sprite_fast = new MySprite()
-			{
-				Type = SpriteType.TEXT,
-				Data = "Fast",
-				Position = new Vector2(60,height-40) + _viewport.Position,
-				RotationOrScale = 1f ,
-				Color = VRageMath.Color.Gray,
-				Alignment = TextAlignment.CENTER /* Center the text on the position */,
-				FontId = "White"
-			};
-			frame.Add(sprite_fast);
+			if ((mode == 1) || (mode == 2))
+				frame.Add(TextSprite(
+					Helpers.FormatCompact(-vertSpeedSetpoint) + "m/s",
+					width-PRIGHT-100,
+					PBOTTOM-PBMARGIN,
+					view,
+					VRageMath.Color.Cyan,
+					TextAlignment.LEFT));
 
-			var sprite_slow = new MySprite()
-			{
-				Type = SpriteType.TEXT,
-				Data = "Slow",
-				Position = new Vector2(width-40,height-40) + _viewport.Position,
-				RotationOrScale = 1f ,
-				Color = VRageMath.Color.Gray,
-				Alignment = TextAlignment.CENTER /* Center the text on the position */,
-				FontId = "White"
-			};
-			frame.Add(sprite_slow);
+			frame.Add(TextSprite(
+				gndAltitude < 1e6 ? gndAltitude.ToString("000") + "m" : ("ALT unknown" + (radar.exists ? " (radar "+(radar.active ? "init" : "off")+")" : " (no radar!)")),
+				PLEFT+PLMARGIN,
+				(PTOP+PBOTTOM)/2-10,
+				view,
+				VRageMath.Color.Yellow,
+				TextAlignment.LEFT));
 
-			var sprite_high = new MySprite()
-			{
-				Type = SpriteType.TEXT,
-				Data = "High",
-				Position = new Vector2(40,60) + _viewport.Position,
-				RotationOrScale = 1f ,
-				Color = VRageMath.Color.Gray,
-				Alignment = TextAlignment.CENTER /* Center the text on the position */,
-				FontId = "White"
-			};
-			frame.Add(sprite_high);
+			VRageMath.Color bordercolor;
+			if (warningState == WarnType.Bad || speedSetpointSrc == SPSource.Unable) {
+				bordercolor = VRageMath.Color.Red;
+			} else if (marginal >= config.marginal_warn) {
+				bordercolor = VRageMath.Color.OrangeRed;
+			} else {
+				bordercolor = VRageMath.Color.White;
+			}
+			Helpers.Rectangle(frame,PLEFT,width-PRIGHT,PTOP,PBOTTOM, view, 2, bordercolor);
 
-			var sprite_low = new MySprite()
+			// THRUST INDICATION
+
+			// Helper method to draw thrust bars
+			Action<List<double>, VRageMath.Color, VRageMath.Color, VRageMath.Color> drawThrustBars = (list, colorA, colorI, colorH) =>
 			{
-				Type = SpriteType.TEXT,
-				Data = "Low",
-				Position = new Vector2(40,height-60) + _viewport.Position,
-				RotationOrScale = 1f ,
-				Color = VRageMath.Color.Gray,
-				Alignment = TextAlignment.CENTER /* Center the text on the position */,
-				FontId = "White"
+				float aref = (float)(list[0] / shipinfo.mass) * THR_SCALE;
+				MySprite sa = MySprite.CreateSprite(
+					"SquareSimple",
+					new Vector2((float)list[3], PBOTTOM - aref / 2) + view.Position,
+					new Vector2((float)list[4], aref)
+				);
+				sa.Color = colorA;
+				frame.Add(sa);
+
+				float iref = (float)(list[1] / shipinfo.mass) * THR_SCALE;
+				MySprite si = MySprite.CreateSprite(
+					"SquareSimple",
+					new Vector2((float)list[3], PBOTTOM - aref - iref / 2) + view.Position,
+					new Vector2((float)list[4], iref)
+				);
+				si.Color = colorI;
+				frame.Add(si);
+
+				float href = (float)(list[2] / shipinfo.mass) * THR_SCALE;
+				MySprite sh = MySprite.CreateSprite(
+					"SquareSimple",
+					new Vector2((float)list[3], PBOTTOM - aref - iref - href / 2) + view.Position,
+					new Vector2((float)list[4], href)
+				);
+				sh.Color = colorH;
+				frame.Add(sh);
 			};
-			frame.Add(sprite_low);
+
+			// Draw the thrust bars for the current and max thrust
+			List<List<double>> data = new List<List<double>>();
+			data.Add(new List<double> { ship.lifters.current_athrust, ship.lifters.current_ithrust, ship.lifters.current_hthrust, LEFT_MARGIN + THR_CUR_W / 2 + 5, THR_CUR_W });
+			data.Add(new List<double> { ship.lifters.eff_athrust, ship.lifters.eff_ithrust, ship.lifters.eff_hthrust, LEFT_MARGIN + THR_CUR_W + THR_MAX_W / 2 + 10, THR_MAX_W });
+
+			foreach (List<double> list in data)
+			{
+				drawThrustBars(list, VRageMath.Color.Green, VRageMath.Color.Blue, VRageMath.Color.Red);
+			}
+
+			// Draw the thrust bars for the density sweep
+			double sweep_left = LEFT_MARGIN + THR_CUR_W + THR_MAX_W + 15;
+			List<List<double>> data2 = new List<List<double>>();
+			for (int i = 0; i < 11; i++)
+			{
+				data2.Add(new List<double> { ship.lifters.eff_hthrust, ship.lifters.ithrust_density[i], ship.lifters.athrust_density[i], sweep_left + THR_SW_W / 2 + i * THR_SW_W, THR_SW_W });
+			}
+
+			foreach (List<double> list in data2)
+			{
+				drawThrustBars(list, VRageMath.Color.Red, VRageMath.Color.Blue, VRageMath.Color.Green);
+			}
+
+			// Gravity estimate
+			if (gravSrc != GravSource.Undefined) {
+				float grav_x = (float)(sweep_left+THR_SW_W/2+Math.Min(planet.atmo_density_sealevel,1)*10*THR_SW_W);
+				frame.Add(MySprite.CreateSprite
+				(
+					"SquareSimple",
+					new Vector2(grav_x,PBOTTOM-(float)gndGravExp*THR_SCALE) + view.Position,
+					new Vector2(10,10)
+				));
+
+				frame.Add(TextSprite(
+					Helpers.ms2_to_g(gndGravExp).ToString("0.00")+"g",
+					(float)sweep_left,
+					PBOTTOM-(float)gndGravExp*THR_SCALE-50,
+					view,
+					warningState == WarnType.Bad ? VRageMath.Color.Red : VRageMath.Color.White,
+					TextAlignment.LEFT));
+			}
+
+			// Gravity scale
+			for (int i=0;i<5;i++) {
+				frame.Add(MySprite.CreateSprite
+				(
+					"SquareSimple",
+					new Vector2(LEFT_MARGIN,PBOTTOM-(float)Helpers.g_to_ms2(i)*THR_SCALE) + view.Position,
+					new Vector2(5,5)
+				));
+			}
+
+			// Bottom Line
+			frame.Add(MySprite.CreateSprite
+			(
+				"SquareSimple",
+				new Vector2(50+LEFT_MARGIN,PBOTTOM) + view.Position,
+				new Vector2(100,2)
+			));
+
+			// HOR
+
+			// Draw a rectangle for the speed scale
+
+			Helpers.Rectangle(frame,width-PRIGHT-2*HMAX*HSCALE,width-PRIGHT,PBOTTOM+20,PBOTTOM+20+2*HMAX*HSCALE, view, 2, VRageMath.Color.White);
+
+			// Horiz speed tgt
+
+			if ((mode == 1) || (mode == 2) || (mode == 3)) {
+				var ssp=MySprite.CreateSprite
+				(
+					"SquareSimple",
+					new Vector2(HHOR-(float)leftSpeedSetpoint*HSCALE,HVER-(float)fwdSpeedSetpoint*HSCALE) + view.Position,
+					new Vector2(12,12)
+				);
+				ssp.Color = VRageMath.Color.Cyan;
+				frame.Add(ssp);
+			}
+
+			// Horiz speed now
+
+			var snow=MySprite.CreateSprite
+			(
+				"SquareSimple",
+				new Vector2(HHOR-(float)Helpers.SatMinMax(leveler.speedLeft,-HMAX,HMAX)*HSCALE,
+							HVER-(float)Helpers.SatMinMax(leveler.speedFwd,-HMAX,HMAX)*HSCALE)
+							 + view.Position,
+				new Vector2(12,12)
+			);
+			snow.Color = VRageMath.Color.Yellow;
+			frame.Add(snow);
+
+			if (radar.self_intersects)
+				frame.Add(MySprite.CreateSprite
+					(
+						"Danger",
+						new Vector2(HHOR,HVER) + view.Position,
+						new Vector2(80,80)
+					));
+
+			// GENERAL
+
+			// Top info
+
+			List<string> top_str = new List<string> {"Soft Landing Manager", planet.name};
+
+			for (int i=0;i < top_str.Count;i++) {
+				frame.Add(TextSprite(
+					top_str[i],
+					width/2,
+					20+i*20,
+					view,
+					VRageMath.Color.White,
+					TextAlignment.CENTER));
+			}
+			
+			// Ver info
+			string info;
+			switch (speedSetpointSrc) {
+				case SPSource.None:
+					info="Disabled";
+					break;
+				case SPSource.Profile:
+					info="Profile";
+					break;
+				case SPSource.AltGravFormula:
+					info="Alt/grav";
+					break;
+				case SPSource.GravFormula:
+					info="Gravity";
+					break;
+				case SPSource.FinalSpeed:
+					info="Final";
+					break;
+				case SPSource.Unable:
+					info="Unable";
+					break;
+				default:
+					info="Unknown";
+					break;
+			}
+
+			List<string> ver_str = new List<string> {"VERTICAL", "Mode "+mode, info};
+
+			for (int i=0;i < ver_str.Count;i++) {
+				frame.Add(TextSprite(
+					ver_str[i],
+					LEFT_MARGIN,
+					height-100+i*20,
+					view,
+					VRageMath.Color.White,
+					TextAlignment.LEFT));
+			}
+
+			// Hor info
+
+			string str1;
+			if (use_angle == true && use_horiz_thr == true) {
+				str1 = "Gyro("+leveler.MaxAngle().ToString("00")+"°)+thrust";
+			} else if (use_angle == true && use_horiz_thr == false) {
+				str1 = "Gyro("+leveler.MaxAngle().ToString("00")+"°) only";
+			} else if (use_angle == false && use_horiz_thr == true) {
+				str1 = "Thrusters only";
+			} else {
+				str1= "Disabled";
+			}
+
+			string str2;
+			switch (radar.mode) {
+				case ScanMode.DoubleStandby:
+					str2 = "Standby (D)";
+					break;
+				case ScanMode.SingleStandby:
+					str2 = "Standby (S)";
+					break;
+				case ScanMode.SingleNarrow:
+					str2 = "Simple avoidance";
+					break;
+				case ScanMode.DoubleEarly:	
+					str2 = "Early avoidance";
+					break;
+				case ScanMode.DoubleWide:
+					str2 = "Wide avoidance";
+					break;
+				default:
+					str2 = "No avoidance";
+					break;
+			}
+
+			List<string> hor_str = new List<string> {"HORIZ", str1,str2};
+
+			for (int i=0;i < hor_str.Count;i++) {
+				frame.Add(TextSprite(
+					hor_str[i],
+					160,
+					height-100+i*20,
+					view,
+					VRageMath.Color.White,
+					TextAlignment.LEFT));
+			}
 
 			frame.Dispose();
 		}
@@ -1635,413 +1581,291 @@ public class LandingManager {
 
 	private void ApplyThrustOverride(double PIDoutput) {
 
-		double thr_wanted;
-		double athr_wanted;
-		double ithr_wanted;
-		double hthr_wanted;
+		// See tech doc §8
 
 		// Compute the total thrust wanted
+		lwrCommand = PIDoutput + 0.5+0.5*Math.Tanh(vertSpeedDelta+5);
+		thrCommand = lwrCommand* shipWeight;
 
-		double sigmoid = Math.Tanh(delta);
-		thr_wanted = (PIDoutput+current_LWRtarget*sigmoid) * shipweight;
-		
-		// Compute the thrust wanted for each thruster type
-		
-		if (mode == 1 && vspeed < -5) {
-			athr_wanted = Helpers.SaturateMinMaxPrioritizeMaxLimit(thr_wanted,shipweight,shipinfo.eff_atmo_thrust);
-		} else {
-			athr_wanted = Helpers.SaturateMinMaxPrioritizeMaxLimit(thr_wanted,0,shipinfo.eff_atmo_thrust);
-		}
-		
-		if (mode == 1 && gnd_altitude > config.early_ion_alt_limit && vspeed < -config.early_ion_speed_limit && delta < 0) {
-			ithr_wanted = Helpers.SaturateMinMaxPrioritizeMaxLimit(thr_wanted-athr_wanted,shipweight,shipinfo.eff_ion_thrust);
-		} else {
-			ithr_wanted = Helpers.SaturateMinMaxPrioritizeMaxLimit(thr_wanted-athr_wanted,0, shipinfo.eff_ion_thrust);
-		}
-		
-		hthr_wanted = thr_wanted-ithr_wanted-athr_wanted;
-		
-		if (thr_wanted > shipinfo.eff_atmo_thrust + shipinfo.eff_ion_thrust + shipinfo.eff_hydro_thrust) {
-			marginal = true;
-		} else {
-			marginal = false;
+		// If the thrust wanted is higher than the total thrust available, we are in a marginal situation
+		if ((thrCommand > ship.lifters.eff_athrust + ship.lifters.eff_ithrust + ship.lifters.eff_hthrust || vertSpeedDelta > 5) && marginal < config.marginal_max)  {
+			marginal++;
+		} else if (marginal > 0) {
+			marginal--;
 		}
 
-		debug_atr_wanted = athr_wanted;
-		debug_htr_wanted = hthr_wanted;
-		debug_itr_wanted = ithr_wanted;
-		debug_tr_wanted = thr_wanted;
+		// Compute minimum thrust in mode 1
+		double min_athrust = (mode==1) ?
+			Helpers.Interpolate(-config.mode1_atmo_speed, -config.mode1_atmo_speed+5, shipWeight, 0, vertSpeed) : 0;
 		
-		// Compute the overrides
+		double min_ithrust = (mode == 1 && gndAltitude > config.mode1_ion_alt_limit && vertSpeedDelta < 0) ?
+ 			Helpers.Interpolate(-config.mode1_ion_speed, -config.mode1_ion_speed+5, shipWeight, 0, vertSpeed) : 0;
 
-		// By default, atmos are overriden to the max so that they update their max effective thrust
-		// If they are actually capable to produce thrust, we compute the actual wanted thrust override
-		
-		if (shipinfo.eff_atmo_thrust > 0) {
-			atmo_override = Helpers.SaturateMinMaxPrioritizeMaxLimit(Convert.ToSingle(athr_wanted/shipinfo.eff_atmo_thrust),0,1);
-		} else {
-			atmo_override = 1;
-		}
-		
-		if (shipinfo.eff_ion_thrust > 0) {
-			ion_override = Helpers.SaturateMinMaxPrioritizeMaxLimit(Convert.ToSingle(ithr_wanted/shipinfo.eff_ion_thrust),0,1);
-		} else {
-			ion_override = 0;
-		}
-
-		if (shipinfo.eff_hydro_thrust > 0) {
-			h2_override = Helpers.SaturateMinMaxPrioritizeMaxLimit(Convert.ToSingle(hthr_wanted/shipinfo.eff_hydro_thrust),0,1);
-		} else {
-			h2_override = 0;
-		}
-		
-		// Apply the thrust override to thrusters
-		
-		foreach (IMyThrust alifter in ship.aero_lifters) {
-			alifter.ThrustOverridePercentage = atmo_override;
-		}   
-
-		foreach (IMyThrust ilifter in ship.ion_lifters) {
-			ilifter.ThrustOverridePercentage = ion_override;
-		}  		
-
-		foreach (IMyThrust hlifter in ship.h2_lifters) {
-			
-			hlifter.ThrustOverridePercentage = h2_override;  
-			if (H2_needed) {
-				hlifter.Enabled = true;
-			}
-		} 
+		ship.lifters.ApplyThrust(thrCommand, min_athrust, min_ithrust);
 	}
 
-	private void ManageParachutes() {
-		if (delta > config.panic_speed_delta && gnd_altitude < config.panic_altitude) {
-			panic = true;
+	private void ManagePanicParachutes() {
 
+		if (vertSpeedDelta > gndAltitude/config.panicRatio + config.panicDelta) {
+			panic = true;
 			foreach (IMyParachute parachute in ship.parachutes) {
 				parachute.OpenDoor();
 			}
-
 		} else {
 			panic = false;
 		}
 	}
-
+	
 	private void ManageSoundBlocks() {
 		
-		if (ship.ship_has_soundblock == true) {
-
+		foreach (IMySoundBlock sound in ship.soundblocks) {
+			
 			if (panic) {
-				ship.soundblock.SelectedSound = "SoundBlockAlert2";
-				ship.soundblock.Play();
-			} else if (warning_atmo || warning_vacuum) {
-				ship.soundblock.SelectedSound = "SoundBlockAlert1";
-				ship.soundblock.Play();
+				sound.Enabled = true;
+				sound.SelectedSound = "SoundBlockAlert2";
+				sound.Play();
+			} else if (warningState == WarnType.Bad || speedSetpointSrc == SPSource.Unable) {
+				sound.Enabled = true;
+				sound.SelectedSound = "SoundBlockAlert1";
+				sound.Play();
 			}
 		}
 	}
 
 	private void ManageTimers() {
 
-		if (gnd_altitude < config.landing_timer_altitude) {
-			if ((ship.landing_timers != null) && (landing_timer_allowed == true)) {
-				foreach (IMyTimerBlock timer in ship.landing_timers) {
-					timer.Trigger();
-				}
-			}
+		if (gndAltitude < config.landingTimerAltitude && landing_timer_allowed) {
 
+			foreach (IMyTimerBlock timer in ship.landing_timers) 
+				timer.Trigger();
 			landing_timer_allowed = false;
 			liftoff_timer_allowed = true;
 		}
 
-		// In case of miconfiguration, make sure that the liftoff triggers altitude is
-		// higher than the landing altitude
-		if (gnd_altitude > Math.Max(config.liftoff_timer_altitude,config.landing_timer_altitude+1)) {
+		// Make sure that the liftoff triggers altitude is higher than the landing altitude
+		if (gndAltitude > Math.Max(config.liftoffTimerAltitude,config.landingTimerAltitude+1) && liftoff_timer_allowed) {
 
-			if ((ship.liftoff_timers != null) && (liftoff_timer_allowed == true)) {
-				foreach (IMyTimerBlock timer in ship.liftoff_timers) {
-					timer.Trigger();
-				}
-			}
-
+			foreach (IMyTimerBlock timer in ship.liftoff_timers)
+				timer.Trigger();
 			liftoff_timer_allowed = false;
 			landing_timer_allowed = true;
 		}
 	}
 
 	private void TriggerOnTimers() {
-		foreach (IMyTimerBlock timer in ship.on_timers) {
+		foreach (IMyTimerBlock timer in ship.on_timers)
 			timer.Trigger();
-		}
 	}
 
 	private void TriggerOffTimers() {
-		foreach (IMyTimerBlock timer in ship.off_timers) {
+		foreach (IMyTimerBlock timer in ship.off_timers)
 			timer.Trigger();
-		}
 	}
 
 	private void ManageRadars() {
-
-		if (ship.ship_has_radar) {
-
-			Vector3D mypos_at_return_time;
-
-			// If we have a previous return, increase the scan range for faster refresh
-			if (radar_distance<1e6) {
-				radar_range = radar_distance+100;
-			}
-
-			radar_avail_range = ship.radar.AvailableScanRange;
-
-			if (ship.radar.CanScan(radar_range)) {
-
-				radar_return = ship.radar.Raycast(radar_range);
-
-				if ((radar_return.Type ==  MyDetectedEntityType.Planet || radar_return.Type == MyDetectedEntityType.LargeGrid) && radar_return.HitPosition.HasValue) {
-
-					// If we have a return (either a planet, or a large grid (landing pad, silo)), update the radar altitude
-
-					radar_valid = true;
-					hitpos = radar_return.HitPosition.Value;
-					mypos_at_return_time = ship.ship_ctrller.GetPosition();
-					radar_distance = VRageMath.Vector3D.Distance(hitpos,mypos_at_return_time); // only used for display on LCDs
-					
-				} else {
-
-					// If we have no return, invalidate the previous return and increase the scan range
-					radar_valid = false;
-					radar_distance = 1e6;
-					radar_range = Math.Min(radar_range*2,config.radar_max_range);
-				}
-			}
-		}
+		radar.ScanForAltitude(90-leveler.pitch,90-leveler.roll);
+		if (use_angle || use_horiz_thr)
+			radar.ScanTerrain(90-leveler.pitch,90-leveler.roll);
 	}
 
 	// ------------------------------
 	// PRIVATE METHODS WITH NO SIDE-EFFECTS
 	// ------------------------------
 
-	// Estimates the surface gravity with what's available and return the value in m/s²
-	private double EstimateSurfaceGravity() {
 
-		if (planet.identified) {
+	private double ComputeLWRTarget(double gravity, int mode, double aLWR, double iLWR, double hLWR) {
 
-			// If the pilot selected the planet from the database, it's easy !
-
-			return planet.g_sealevel*9.81;
-
-		} else {
-
-			// Otherwise, we have to use the estimator
-
-			// First, we compute a ground estimate, weighted with the estimator confidence (low confidence means we use some proportion of the current gravity)
-			// Then, we mix that unconditionnaly with a proportion of the current gravity (proportion is configurable)
-
-			double weighted_ground_estimate = surf_grav_estimator.confidence*surf_grav_estimator.est_gravity + (1-surf_grav_estimator.confidence)*naturgraval;
-			double high_alt_estimate = config.ground_grav_estimate_proportion*weighted_ground_estimate + (1-config.ground_grav_estimate_proportion)*naturgraval;
-
-			if (gnd_altitude > config.grav_est_altitude_transition_start) {
-
-				// At high altitude, we use the high altitude estimation
-
-				return high_alt_estimate;
-
-			} else if (gnd_altitude <= config.grav_est_altitude_transition_start && gnd_altitude > config.grav_est_altitude_transition_end) {
-
-				// In between, linear interpolation
-
-				double ratio = (gnd_altitude-config.grav_est_altitude_transition_end)/(config.grav_est_altitude_transition_start-config.grav_est_altitude_transition_end);
-				return ratio*high_alt_estimate + (1-ratio)*naturgraval;
-
-			} else {
-
-				// At low altitude, only the measured local gravity
-
-				return naturgraval;
-			}
-		}
-	}
-
-	private double ComputeLWRTarget(double gravity, int mode, double aLWR, double iLWR, double hLWR, double LWR_sufficient, double LWR_start, double factor, double offset, double limit) {
-
-		// Compute the lift to weight ratio
-		// that will be used to compute the vertical speed set-point :
-		// In mode 1:
-		// - Only electric thrusters when they are sufficient
-		// - All thrusters when needed
-		// - Progressive transition between
-		// In other modes:
-		// - Allways all thrusters
-
-		double computedLWRtarget = 0;
+		double computedLWRtarget;
 
 		if (gravity>0) {
-			
 			if (mode == 1) {
-				if (aLWR + iLWR > LWR_sufficient) {
-
-					// Electric thrusters are sufficient
-					// Hydrogen thrusters not used
-
-					H2_needed = false;
-					computedLWRtarget = aLWR + iLWR;
-
-				} else if (aLWR + iLWR > LWR_start) {
-
-					// Transition between electric and hydrogen thrusters
-
-					H2_needed = true;
-
-					double ratio = (aLWR+iLWR-LWR_start)/(LWR_sufficient-LWR_start);
-
-					computedLWRtarget = Math.Min(aLWR + iLWR + hLWR * (1-ratio),LWR_sufficient);
-				
-				} else {
-
-					// Hydrogen thrusters needed
-
-					H2_needed = true;
-					computedLWRtarget = aLWR + iLWR + hLWR;
-
-				}
+				computedLWRtarget = Helpers.Interpolate(config.elec_LWR_start, config.elec_LWR_sufficient,aLWR + iLWR + hLWR, aLWR + iLWR, aLWR + iLWR);
 			} else {
-
 				computedLWRtarget = aLWR + iLWR + hLWR;
-				H2_needed = true;
-
 			}
 			
 			// Compute final target : apply margins (ratio and offset), then limit to the max value
-			computedLWRtarget = Math.Min((computedLWRtarget/factor) - offset,limit);
+			return Math.Min((computedLWRtarget/config.LWRsafetyfactor) - config.LWRoffset,config.LWRlimit);
 		} else {
-			computedLWRtarget = 0;
+			return 0;
 		}
-
-		return computedLWRtarget;
 	}
 
-	private double ComputeLiftToWeightRatio(double gravity, double shipmass, double thrust) {
+	private double ComputeLWR(double gravity, double shipmass, double thrust) {
 		return (gravity>0) ? thrust / (gravity*shipmass) : 0;
+	}
+
+	private bool CheckGearLock() {
+		foreach (IMyLandingGear gear in ship.gears) {
+			if (!gear.Closed && gear.IsWorking && gear.IsLocked )
+				return true;
+		}
+		return false;
+	}
+
+	public List<string> LogNames() {
+		return new List<string>{"mode","grav_now","vspeed","vspeed_sp","speed_sp_source","gnd_altitude","gnd_sl_offset","alt_source","vpid_p","vpid_i","vpid_d","PIDoutput","twr_wanted"};
+	}
+
+	public List<double> LogValues() {
+		return new List<double>{mode,grav_now,vertSpeed,vertSpeedSetpoint,(float)speedSetpointSrc,gndAltitude,gnd_sl_offset,(float)altSrc,vert_PID.ap,vert_PID.ai,vert_PID.ad,vert_PID.output,lwrCommand};
+	}
+
+	public List<string> AllLogNames() {
+		List<string> names = new List<string>();
+		names.AddRange(this.LogNames());
+		names.AddRange(radar.LogNames());
+		names.AddRange(horizThrusters.LogNames());
+
+		return names;
+	}
+
+	public List<double> AllLogValues() {
+		List<double> values = new List<double>();
+		values.AddRange(this.LogValues());
+		values.AddRange(radar.LogValues());
+		values.AddRange(horizThrusters.LogValues());
+
+		return values;
+	}
+
+	private MySprite TextSprite(string text, float x, float y, VRageMath.RectangleF view, VRageMath.Color color, TextAlignment align) {
+		return new MySprite()
+			{
+			Type = SpriteType.TEXT,
+			Data = text,
+			Position = new Vector2(x,y) + view.Position,
+			RotationOrScale = 1f ,
+			Color = color,
+			FontId = "White",
+			Alignment = align
+			};
 	}
 	
 }
 
-
-
+/// <summary>
+/// Estimates the surface gravity of a planet (for "Real Orbits" mod)
+/// See tech doc §6
+/// </summary>
 public class EarlySurfaceGravityEstimator {
 
-	// This allows to estimate the surface gravity of a planet
-	// while still very far from it.
-	// This assumes an inverse square law, ie use of the "Real Orbits" mode
+	public double current_est_radius=0;
+	public double best_est_radius=0;
+	public double current_est_gravity=0;
+	public double best_est_gravity=0;
+	public double current_confidence, best_confidence;
 
-	double prev_grav = 0;
+	double grav_prev = 0;
+	double alt_sl_prev = 0;
 
-	double prev_alt = 0;
-	public double est_radius=0;
-	public double est_gravity=0;
-	public double confidence;
-	
+	public void UpdateEstimates(double grav, double alt_sl, double hillparam) {
 
+		double A, B, C, delta, new_est_radius;
 
-
-	public void UpdateEstimates(double grav, double alt, double alt_offset) {
-
-		// Solve the equation :
-		// grav * (radius+alt)² = prev_grav * (radius+prev_alt)²
-		// for the unknown radius
-
-		// At each call, use the new updated values for the computations
-		// and then push them to the old values for the next update
-
-		double A;
-		double B;
-		double C;
-		double delta;
-		double new_est_radius;
-
-		if (prev_grav == 0 || prev_alt == 0) {
+		if (grav_prev == 0 || alt_sl_prev == 0) {
 			// First run, initalize and don't return anything
-			prev_grav = grav;
-			prev_alt = alt;
+			grav_prev = grav;
+			alt_sl_prev = alt_sl;
 			new_est_radius = -1;
 
-		} else if (grav != prev_grav && alt != prev_alt && grav > 0) {
+		} else if (grav != grav_prev && alt_sl != alt_sl_prev && grav > 0) {
 
-			A = grav - prev_grav;
-			B = grav*alt - prev_grav*prev_alt;
-			C = grav*alt*alt - prev_grav*prev_alt*prev_alt;
+			A = grav - grav_prev;
+			B = 2*grav*alt_sl - 2*grav_prev*alt_sl_prev;
+			C = grav*alt_sl*alt_sl - grav_prev*alt_sl_prev*alt_sl_prev;
 			delta = B*B - 4*A*C;
 
-			prev_grav = grav;
-			prev_alt = alt;
+			grav_prev = grav;
+			alt_sl_prev = alt_sl;
 
 			if (delta >=0) {
 				new_est_radius =  (-B + Math.Sqrt(delta))/(2*A);
 
 				if (new_est_radius > 1e6) {
-					confidence = 0;
+					current_confidence = 0;
 				} else {
 					// Confidence in the estimation is based on how much it changes from one sample to the next
-					confidence = Math.Min(new_est_radius,est_radius)/Math.Max(new_est_radius,est_radius);
+					current_confidence = Math.Min(new_est_radius,current_est_radius)/Math.Max(new_est_radius,current_est_radius);
 				}
 
-				est_radius = new_est_radius;
+				current_est_radius = new_est_radius;
 				 
 			} else {
 				// This should not happen
-				est_radius =  -2;
-				confidence = 0;
+				current_est_radius =  -2;
+				current_confidence = 0;
 			}
 
 		} else {
-			est_radius =  -3;
-			confidence = 0;
+			current_est_radius =  -3;
+			current_confidence = 0;
 		}
 
-		if (alt+est_radius > 0 && est_radius>0) {
+		if (alt_sl+current_est_radius > 0 && current_est_radius>0) {
 
-			double coeff = grav * Math.Pow(alt+est_radius,2); // coeff is K in g=K*1/r²
-			est_gravity = coeff / Math.Pow(est_radius+alt_offset,2);
+			current_est_gravity = grav * Math.Pow((alt_sl+current_est_radius)/(current_est_radius*(1+hillparam)),2);
 			
 		} else {
-			est_gravity = -1;
-			confidence = 0;
+			current_est_gravity = -1;
+			current_confidence = 0;
 		}
 
-		confidence = Helpers.SaturateMinMaxPrioritizeMaxLimit(confidence,0,1);
+		current_confidence = Helpers.SatMinMax(current_confidence,0,1);
+
+		if (current_confidence > best_confidence || current_confidence > 0.95) {
+			best_confidence = current_confidence;
+			best_est_radius = current_est_radius;
+			best_est_gravity = current_est_gravity;
+		}
 	}
 
 	public void Reset() {
-		prev_grav = 0;
-		prev_alt = 0;
+		grav_prev = 0;
+		alt_sl_prev = 0;
+		best_confidence = 0;
+	}
+
+	public string DebugString() {
+
+		string str = "[SURFACE GRAVITY ESTIMATOR]";
+		
+		str += "\nCurrent : R=:"+current_est_radius.ToString("000000")+"m, g="+ Helpers.ms2_to_g(current_est_gravity).ToString("0.00")+"g, c="+current_confidence.ToString("0.00");
+		str += "\nBest    : R=:"+best_est_radius.ToString("000000")+"m, g="+Helpers.ms2_to_g(best_est_gravity).ToString("0.00")+"g, c="+best_confidence.ToString("0.00");
+		
+		return str;
+
 	}
 }
 
-
+/// <summary>
+/// Build a liftoff profile for a ship, based on its characteristics and the planet it is on, then used to control the ship during the landing phase by looking up the vertical speed according to altitude.
+/// See tech doc §5
+/// </summary>
 public class LiftoffProfileBuilder {
 
-	private const float DT_START=1; 			// Time step in seconds
-	private const int NB_PTS=256;	// Number of time steps to compute
-	private float dt=DT_START;
+	public double[] vert_speed = new double[NB_PTS];
+	public double[] alt_sl = new double[NB_PTS];
+	public double[] aratio = new double[NB_PTS];
+	public double[] iratio = new double[NB_PTS];
+	public double[] hratio = new double[NB_PTS];
+	public double[] h2_used = new double[NB_PTS];	// in liters
 
-	public float[] vert_speed = new float[NB_PTS];
-	public float[] alt_sl = new float[NB_PTS];
-
+	const double DT_START=0.5; 			// Time step in seconds
+	const int NB_PTS=256;	// Number of time steps to compute
+	const double H2_FLOW_RATIO = 0.00081; // liter per second per N of thrust
+	double dt=DT_START;
 	// A landing profile has two attribues :
 	// - computed : if the profile has been computed or not
-	// - valid    : if the computed profile concludes on a successfull liftoff, meaning that the vertical
-	// speed is always positive. If the profile is computed but invalid, that means the ship is not capable
-	// of exiting the planet gravity well. It is however possible that the ship is capable of landing safely
-	// (ex : with a lot of atmopheric thrusters) but this landing profile cannot be used to control landing
-	// and a backup method will be needed.
-	private bool valid = false;
-	private bool computed = false;
+	// - valid    : if the computed profile concludes on a successfull liftoff
+	bool valid = false;
+	bool computed = false;
+
 
 	// Compute atmospheric density at a set altitude above sea level, based on planet info and radius
-	private float ComputeAtmoDensity(float alt_above_sl, PlanetInfo planet, float radius) {
+	private double ComputeAtmoDensity(double alt_above_sl, PlanetInfo planet, double radius) {
 		
-		float atmo_alt = radius*planet.atmo_limit_altitude*planet.hillparam;
+		double atmo_alt = radius*planet.atmo_limit_altitude*planet.hillparam;
 
 		if (alt_above_sl > atmo_alt) {
 			return 0;
@@ -2053,86 +1877,100 @@ public class LiftoffProfileBuilder {
 	}
 
 	// Compute gravity value at a set altitude above sea level, based on planet info and radius
-	private float ComputeGravity(float alt_above_sl, PlanetInfo planet, float radius) {
-		
-		float PlanetMaxRadius = radius * (1 + planet.hillparam);
+	private double ComputeGravity(double alt_above_sl, PlanetInfo planet, double radius) {
+
+		double PlanetMaxRadius = radius * (1 + planet.hillparam);
 
 		if (alt_above_sl >= (PlanetMaxRadius-radius)) {
-			return planet.g_sealevel * (PlanetMaxRadius/(alt_above_sl+radius))*(PlanetMaxRadius/(alt_above_sl+radius));
+			double raw = Helpers.g_to_ms2(planet.g_sealevel * (PlanetMaxRadius/(alt_above_sl+radius))*(PlanetMaxRadius/(alt_above_sl+radius)));
+			if (raw > Helpers.g_to_ms2(0.05)) {
+				return raw;
+			} else {
+				return 0;
+			}
 		} else {
-			return planet.g_sealevel;
+			return Helpers.g_to_ms2(planet.g_sealevel);
 		}
 	}
 
-	// Build the altitude/speed profile by simulating a liftoff from a standstill at the surface
-	public void Compute(float alt_start, ShipInfo shipinfo, PlanetInfo planet, float radius, float max_accel, float max_twr, float safetyfactor) {
+	// Build the altitude/speed profile by simulating a liftoff from a standstill at a specified
+	// altitude above sea level.
+	public void Compute(double alt_start, ShipInfo shipinfo, PlanetInfo planet, double radius, double max_accel, double max_twr, double safetyfactor, double max_speed, double init_speed, ThrGroup lifters) {
 
-		float gravity;		// m/s²
-		float athrust;		// N
-		float ithrust;		// N
-		float hthrust;		// N
-		float total_thrust;	// N
-		float thrust_max_accel;
-		float thrust_max_twr;
+		double gravity;		// m/s²
+		double athrust, ithrust, hthrust, total_thrust;	// N
+		double thrust_max_accel, thrust_max_twr;
+		double t=0;
 
-		float accel;		// m/s², positive up
+		double accel;		// m/s², positive up
 		bool temp_valid = true;
 
-		vert_speed[0]=0;
+		double safety_inverse = 1/safetyfactor;
+
+		vert_speed[0]=init_speed;
 		alt_sl[0]=alt_start;
+		aratio[0]=1;
+		iratio[0]=1;
+		hratio[0]=1;
+		h2_used[0]=0;
 
 		dt=DT_START;
 
 		for (int i=1; i<NB_PTS; i++ ) {
 
-			// Atmospheric density above 1 does not provide more thrust to atmo thruster
-			// and doesn't lower the ion effectiveness even more.
+			t = t+dt;
 
-			gravity = 9.81f*ComputeGravity(alt_sl[i-1], planet, radius);
+			gravity = ComputeGravity(alt_sl[i-1], planet, radius);
+			double atmoDensity = ComputeAtmoDensity(alt_sl[i - 1], planet, radius);  // Cache atmo density
 
-			thrust_max_accel = shipinfo.mass*max_accel;
+			thrust_max_accel = shipinfo.mass*Math.Min(max_accel,gravity+2*t);
 			thrust_max_twr = shipinfo.mass*gravity*max_twr;
 
 			// Compute maximum thrust for electric thrusters
 
 			if (planet.ignore_atmo) {
-
+				
 				// Since we're going down, it's safe to assume that whatever thrust the atmo thrusters
 				// can provide right now, they can provide at least as much for the remainder of the descent
-				athrust = shipinfo.eff_atmo_thrust;
-				ithrust = shipinfo.IonThrustForAtmoDensity(ComputeAtmoDensity(alt_sl[i-1], planet, radius));
-
+				athrust = Math.Max(lifters.eff_athrust, lifters.AtmoThrustForAtmoDensity(atmoDensity)) * safety_inverse;
 			} else {
-				athrust = shipinfo.AtmoThrustForAtmoDensity(ComputeAtmoDensity(alt_sl[i-1], planet, radius));
-				ithrust = shipinfo.IonThrustForAtmoDensity(ComputeAtmoDensity(alt_sl[i-1], planet, radius));
+				athrust = lifters.AtmoThrustForAtmoDensity(atmoDensity) * safety_inverse;
 			}
+			athrust = Helpers.Min3(athrust, thrust_max_accel, thrust_max_twr);
+			
+			ithrust = lifters.IonThrustForAtmoDensity(atmoDensity) * safety_inverse;
+			ithrust = Helpers.Min3(ithrust, thrust_max_accel-athrust, thrust_max_twr-athrust);
 
 			// Compute the hydrogen thrust so as not to exceed the limit
+			if (vert_speed[i-1] >= max_speed) {
+				hthrust=Math.Max(0,shipinfo.mass*gravity-athrust-ithrust);
+			} else {
+				hthrust=Math.Max(0,Helpers.Min3(lifters.max_hthrust, thrust_max_accel-athrust-ithrust, thrust_max_twr-athrust-ithrust)) * safety_inverse;
+			}
+			h2_used[i]=h2_used[i-1]+hthrust*H2_FLOW_RATIO*dt;
 
-			hthrust=Math.Max(0,Math.Min(shipinfo.max_hydro_thrust, Math.Min(thrust_max_accel-athrust-ithrust, thrust_max_twr-athrust-ithrust)));
+			total_thrust=hthrust+athrust+ithrust;
 
-			total_thrust=(hthrust+athrust+ithrust)/safetyfactor;
+			aratio[i]=athrust/total_thrust;
+			iratio[i]=ithrust/total_thrust;
+			hratio[i]=hthrust/total_thrust;
 
 			// Apply Newton formula
-
 			accel = total_thrust/shipinfo.mass - gravity;
 
 			// Integrate acceleration to compute speed
-
-			vert_speed[i]= accel * dt + vert_speed[i-1];
+			vert_speed[i]= Math.Min(accel * dt + vert_speed[i-1], max_speed);
 
 			// If at any point, the vertical speed becomes negative, then it is a failed liftoff
-
 			if (vert_speed[i] < 0) {
 				temp_valid = false;
 				break;
 			}
 
 			// Integrate speed to compute altitude above sea level
+			alt_sl[i] = alt_sl[i-1] + vert_speed[i-1] * dt + 0.5 * accel * dt * dt;
 
-			alt_sl[i] = 0.5f * accel * dt*dt + vert_speed[i-1] * dt + alt_sl[i-1];
-
-			dt=dt+0.05f;
+			dt+=0.05;
 
 		}
 		computed = true;
@@ -2142,30 +1980,29 @@ public class LiftoffProfileBuilder {
 	// Interpolates the altitude/speed profile to return the speed corresponding to the altitude given.
 	// Uses linear interpolation, with binary search
 	// If the altitude is above the final computed altitude, return the final computed speed.
-	public float Interpolate(float alt) {
+	public double InterpolateSpeed(double alt) {
+		return Interpolate(alt, ref vert_speed);
+	}
+
+	public double InterpolateH2Used(double alt) {
+		return Interpolate(alt, ref h2_used);
+	}
+
+	private double Interpolate(double alt, ref double[] y) {
 
 		int left = 0;
 		int right = NB_PTS-1;
 		int m=(left + right) / 2;
 
-		if (valid == false) {
-			return 0;
-		}
+		if (!valid) return 0;
 
 		// If we are currently below the starting altitude, return 0
-
-		if (alt<=alt_sl[0]) {
-			return 0;
-		}
+		if (alt<=alt_sl[0]) return y[0];
 
 		// If we are currently above the altitude of the last simulated point, return the speed corresponding to that
-
-		if (alt >= alt_sl[NB_PTS-1]) {
-			return vert_speed[NB_PTS-1];
-		}
+		if (alt >= alt_sl[NB_PTS-1]) return y[NB_PTS-1];
 
 		// Binary search
-
 		while (left <= right) {
 			if (alt_sl[m] == alt) {
 				break;
@@ -2177,13 +2014,11 @@ public class LiftoffProfileBuilder {
 			m=(left + right) / 2;
 		}
 
-		if (m+1>=NB_PTS) {
-			 return vert_speed[NB_PTS-1];
-		}
+		if (m+1>=NB_PTS) return y[NB_PTS-1];
 
 		// Now m is the index such that alt_sl[m] is the highest value lower than alt
-
-		return vert_speed[m] + (alt-alt_sl[m]) * (vert_speed[m+1]-vert_speed[m]) / (alt_sl[m+1]-alt_sl[m]);
+		return Helpers.Interpolate(alt_sl[m], alt_sl[m+1], y[m], y[m+1], alt);
+		
 	}
 
 	public void Invalidate() {
@@ -2191,15 +2026,10 @@ public class LiftoffProfileBuilder {
 		computed = false;
 	}
 
-	public bool IsValid() {
-		return valid;
-	}
+	public bool IsValid() => valid;
+	public bool IsComputed() => computed;
 
-	public bool IsComputed() {
-		return computed;
-	}
-
-	public float GetFinalSpeed() {
+	public double GetFinalSpeed() {
 		if (valid & computed) {
 			return vert_speed[NB_PTS-1];
 		} else {
@@ -2207,160 +2037,1231 @@ public class LiftoffProfileBuilder {
 		}
 	}
 
-	public float GetFinalAlt() {
+	public double GetFinalAlt() {
 		if (valid & computed) {
 			return alt_sl[NB_PTS-1];
 		} else {
 			return 0;
 		}
 	}
+
+	public string DebugString() {
+		
+		string str = "[LITFOFF PROFILE]";
+
+		str += "\nComputed:"+computed.ToString()+" Valid:"+valid.ToString();
+		str += "\nFinal:"+vert_speed[NB_PTS-1].ToString("000.0")+"m/s , "+alt_sl[NB_PTS-1].ToString("000.0")+"m , "+(h2_used[NB_PTS-1]/1000).ToString("000.0")+"kL";
+		str += "\nAlt(m) | speed (m/s) | a/i/h ratio";
+		for (int i=0; i<10; i++) {
+			str += "\n"+alt_sl[i].ToString("000.0") +"  | "+vert_speed[i].ToString("000.0") + "  | "+aratio[i].ToString("0.00")+" "+iratio[i].ToString("0.00")+" "+hratio[i].ToString("0.00");
+		}
+
+		return str;
+	}
 }
 
+/// <summary>
+/// Computes ship info, such as mass, inertia, H2 tank status, etc.
+/// See tech doc §12.6
+/// </summary>
 public class ShipInfo {
-	public float mass;				// kg
+	public double mass;		// kg
+	public double inertia;	// kg.m²
 
-	public float max_hydro_thrust; 	// Newtons
-	public float max_ion_thrust;	// Newtons
-	public float max_atmo_thrust;	// Newtons
+	ShipBlocks ship;
+	readonly SLMConfiguration config;
 
-	public float eff_hydro_thrust; 	// Newtons
-	public float eff_ion_thrust;	// Newtons
-	public float eff_atmo_thrust;	// Newtons
-
-	public float current_hydro_thrust; 	// Newtons
-	public float current_ion_thrust;	// Newtons
-	public float current_atmo_thrust;	// Newtons
-
-	public void UpdateMass(ShipBlocks ship) {
-		MyShipMass masse =  ship.ship_ctrller.CalculateShipMass();
-		mass = masse.TotalMass;
+	public ShipInfo(ShipBlocks ship, SLMConfiguration config) {
+		this.ship = ship;
+		this.config = config;
+		UpdateMass();
+		UpdateInertia();
 	}
 
-	public void UpdateThrust(ShipBlocks ship) {
-
-		eff_atmo_thrust=0;
-		eff_ion_thrust=0;
-		eff_hydro_thrust=0;
-		max_atmo_thrust=0;
-		max_ion_thrust=0;
-		max_hydro_thrust=0;
-		current_atmo_thrust=0;
-		current_ion_thrust=0;
-		current_hydro_thrust=0;
-
-		foreach (IMyThrust alifter in ship.aero_lifters) {
-			if (alifter.IsWorking) {
-				eff_atmo_thrust = eff_atmo_thrust + alifter.MaxEffectiveThrust;
-				max_atmo_thrust = max_atmo_thrust + alifter.MaxThrust;
-				current_atmo_thrust = current_atmo_thrust + alifter.CurrentThrust;
-			}
-		}    
-		
-		foreach (IMyThrust ilifter in ship.ion_lifters) {
-			if (ilifter.IsWorking) {
-				eff_ion_thrust = eff_ion_thrust + ilifter.MaxEffectiveThrust;
-				max_ion_thrust = max_ion_thrust + ilifter.MaxThrust;
-				current_ion_thrust = current_ion_thrust + ilifter.CurrentThrust;
-			}
-		} 
-
-		foreach (IMyThrust hlifter in ship.h2_lifters) {
-			if (hlifter.IsWorking ) {
-				eff_hydro_thrust = eff_hydro_thrust + hlifter.MaxEffectiveThrust;
-				max_hydro_thrust = max_hydro_thrust + hlifter.MaxThrust;
-				current_hydro_thrust = current_hydro_thrust + hlifter.CurrentThrust;
-			}
-		} 
+	public void UpdateMass() {
+		mass = ship.ship_ctrller.CalculateShipMass().TotalMass;
 	}
 
-	public float AtmoThrustForAtmoDensity(float density) {
+	public void UpdateInertia() {
+		Vector3I extend = ship.ship_ctrller.CubeGrid.Max - ship.ship_ctrller.CubeGrid.Min;
+		Vector3D size = extend * ship.ship_ctrller.CubeGrid.GridSize;
+		double inertia_x = mass * (size.Y*size.Y + size.Z*size.Z) / 12;
+		double inertia_y = mass * (size.X*size.X + size.Z*size.Z) / 12;
+		double inertia_z = mass * (size.X*size.X + size.Y*size.Y) / 12;
 
-		float density_effective = Math.Min(density, 1);
-		return max_atmo_thrust * density_effective;
+		inertia = Helpers.Max3(inertia_x, inertia_y, inertia_z);
 	}
 
-	public float IonThrustForAtmoDensity(float density) {
+	public double MaxAngle() {
+		return ship.gyros.Count / inertia * (ship.ship_ctrller.CubeGrid.GridSizeEnum == MyCubeSize.Small ? config.inertiaRatioSmall : config.inertiaRatioLarge);
+	}
 
-		float density_effective = Math.Min(density, 1);
-		return max_ion_thrust * (1-0.8f*density_effective);
+	public double H2_stored_liters() {
+		double fill = 0;
+		foreach (IMyGasTank tank in ship.h2_tanks) {
+			fill += tank.FilledRatio * tank.Capacity;
+		}
+		return fill;
+	}
+
+	public double H2_capa_liters() {
+		double capa = 0;
+		foreach (IMyGasTank tank in ship.h2_tanks) {
+			capa += tank.Capacity;
+		}
+		return capa;
+	}
+
+	public string DebugString() {
+		return "[SHIP INFO]\n"+mass.ToString("000000")+"kg "+inertia.ToString("000000")+"kg.m² "+MaxAngle().ToString("00.00")+"° "+(H2_stored_liters()/1000).ToString("0"); 
 	}
 	
 }
 
+/// <summary>
+/// PID controller with anti-windup and low-pass filtering of the D component
+/// See tech doc §12.5
+/// </summary>
 public class PIDController {
 
-	// PID coefficients (constant during execution, defined with the constructor)
-	private readonly float KP;
-	private readonly float KI;
-	private readonly float KD;
-	private readonly float AI_MIN;
-	private readonly float AI_MAX_FIXED;
-	private readonly float AD_FILT;
-
-	// PID parameters
-	float delta_prev = 0;
-	float deriv_prev = 0;
-	public float ap = 0;
-	public float ai = 0;
-	public float ad = 0;
-	public float PIDoutput = -1;
-
+	public double output = -1;
 	
+	public double ap, ai, ad;
 
-	public PIDController(double kp, double ki, double kd, double ai_min, double ai_max_fixed, double ad_filt) {
-		KP=(float)kp;
-		KI=(float)ki;
-		KD=(float)kd;
-		AI_MIN=(float)ai_min;
-		AI_MAX_FIXED=(float)ai_max_fixed;
-		AD_FILT=(float)Helpers.SaturateMinMaxPrioritizeMaxLimit(ad_filt,0,1);
+	// PID coefficients (constant during execution, defined with the constructor)
+	readonly double KP, KI, KD, AI_MIN_FIXED, AI_MAX_FIXED, AD_FILT, AD_MAX;
+
+	// Private PID parameters
+	double delta_prev, deriv_prev;
+
+	public PIDController(double kp, double ki, double kd, double ai_min_fixed, double ai_max_fixed, double ad_filt, double ad_max) {
+		KP=kp;
+		KI=ki;
+		KD=kd;
+		AI_MIN_FIXED=ai_min_fixed;
+		AI_MAX_FIXED=ai_max_fixed;
+		AD_FILT=Helpers.SatMinMax(ad_filt,0,1);
+		AD_MAX=ad_max;
 	}
 
 
+	public void UpdatePID(double delta) {
+		UpdatePIDController(delta, AI_MIN_FIXED, AI_MAX_FIXED);
+	}
 
-	public void UpdatePIDController(float delta, float ai_max_dynamic) {
-
-		// The output of the PID is in units of thrust-to-weight ratio (dimentionless)
-
-		PIDoutput = -1;
+	public void UpdatePIDController(double delta, double ai_min_dynamic, double ai_max_dynamic) {
 
 		delta = Helpers.NotNan(delta);
 
-		// Low-pass filtering of the derivative component
-		
-		float deriv = AD_FILT * deriv_prev + (1-AD_FILT) *(delta - delta_prev);
-
-		deriv_prev = deriv;
-		delta_prev = delta;
-		
 		// P
 		ap = delta * KP;
 
 		// I
 		ai = ai + delta*KI;
 
-		ai = Helpers.SaturateMinMaxPrioritizeMaxLimit(ai, AI_MIN, AI_MAX_FIXED);
-
-		ai = Math.Min(ai, ai_max_dynamic);
+		// Saturate the integral component, first with fixed limits (that have priority), then with dynamic limits
+		ai = Helpers.SatMinMax(ai, AI_MIN_FIXED, AI_MAX_FIXED);
+		ai = Helpers.SatMinMax(ai, ai_min_dynamic, ai_max_dynamic);
 		
 		// D
+		// Low-pass filtering of the derivative component
+		double deriv = AD_FILT * deriv_prev + (1-AD_FILT) *(delta - delta_prev);
+		deriv_prev = deriv;
+		delta_prev = delta;
 		ad = deriv*KD;
+		ad = Helpers.SatMinMax(ad, -AD_MAX, AD_MAX);
 		
 		// PID output
-		PIDoutput = ap + ai + ad;
+		output = ap + ai + ad;
 
 	}
 
-	public void ResetPIDController() {
+	public void Reset() {
 		deriv_prev=0;
 		delta_prev=0;
 		ap=0;
 		ai=0;
 		ad=0;
 	}
+
+	public string DebugString() {
+
+		return "P: " +  Math.Round(ap,2).ToString("+0.00;-0.00") + " I:" + Math.Round(ai,2).ToString("+0.00;-0.00") +" D:"+Math.Round(ad,2).ToString("+0.00;-0.00");
+
+	}
+}
+
+/// <summary>
+/// Gyroscope controller to align the ship with a target orientation (from Flight Assist by Naosyth)
+/// See tech doc §9
+/// </summary>
+public class GyroController 
+{
+	private bool gyroOverride;
+	private double angle;
+	
+	readonly List<IMyGyro> gyros;
+	readonly double gyroRpmScale;
+	Vector3D reference, target;
+
+	public GyroController(List<IMyGyro> gyros, double gyroRpmScale)
+	{
+		this.gyros = gyros;
+		this.gyroRpmScale = gyroRpmScale;
+	}
+
+	public void SetGyroOverride(bool state)
+	{
+		gyroOverride = state;
+		foreach (IMyGyro g in gyros) {
+			
+			if (!state) {
+				g.Pitch = 0;
+				g.Yaw = 0;
+				g.Roll = 0;
+			}
+			g.GyroOverride = state;
+		}
+	}
+
+	public void SetTargetOrientation(Vector3D setReference, Vector3D setTarget)
+	{
+		reference = setReference;
+		target = setTarget;
+	}
+
+	public void Tick()
+	{
+		if (!gyroOverride) return;
+		
+		foreach (IMyGyro g in gyros) {
+
+			// Translating the reference and target vectors to local space of the gyro
+			Matrix localOrientation;
+			g.Orientation.GetMatrix(out localOrientation);
+			var localReference = Vector3D.Transform(reference, MatrixD.Transpose(localOrientation));
+			var localTarget = Vector3D.Transform(target, MatrixD.Transpose(g.WorldMatrix.GetOrientation()));
+
+			// Calculating the rotation needed to align the gyro with the target
+			// using the cross product of the local reference and target vectors
+			var axis = Vector3D.Cross(localReference, localTarget);
+			angle = axis.Length();
+
+			// Don't know what this does
+			angle = Math.Atan2(angle, Math.Sqrt(Math.Max(0.0, 1.0 - angle * angle)));
+
+			// If the angle is negative, the rotation is in the opposite direction
+			if (Vector3D.Dot(localReference, localTarget) < 0)
+				angle = Math.PI - angle;
+
+			// Scaling the rotation : keep the axis of rotation, but scale the angle
+			axis.Normalize();
+			axis *= Math.Max(0.002, g.GetMaximum<float>("Roll") * MathHelper.RPMToRadiansPerSecond * (angle / Math.PI) * gyroRpmScale);
+
+			// Applying the rotation to the gyroscope
+			g.Pitch = (float)-axis.X;
+			g.Yaw = (float)-axis.Y;
+			g.Roll = (float)-axis.Z;
+		}
+
+	}
+}
+
+/// <summary>
+/// Manages ship orientation to achieve a desired forward and lateral speed.
+/// See tech doc §9
+/// </summary>
+public class AutoLeveler {
+
+	private readonly int delay;
+	private readonly double gyroResponsiveness;
+	private readonly double maxAngle;
+	private bool Enabled = false;
+	private readonly IMyShipController cockpit;
+	private readonly GyroController gyroController;
+	private int timer;
+	private double desiredPitch, desiredRoll;
+
+	public double pitch, roll;
+	public double speedFwd, speedLeft, desiredSpeedFwd, desiredSpeedLeft;
+
+	public AutoLeveler(IMyShipController cockpit, List<IMyGyro> gyros, double maxAngle, int delay, double gyroResponsiveness, double gyroRpmScale) {
+		this.cockpit = cockpit;
+		this.gyroController = new GyroController(gyros, gyroRpmScale);
+		this.maxAngle = maxAngle;
+		this.delay = delay;
+		this.gyroResponsiveness = gyroResponsiveness;
+	}
+
+	public void Enable() {
+		Enabled = true;
+		gyroController.SetGyroOverride(true);
+	}
+
+	public void Disable() {
+		Enabled = false;
+		gyroController.SetGyroOverride(false);
+		speedFwd = 0;
+		speedLeft = 0;
+		desiredSpeedFwd = 0;
+		desiredSpeedLeft = 0;
+	}
+
+	public void Tick(double speedFwd, double speedLeft, double desiredSpeedFwd, double desiredSpeedLeft) {
+		
+		this.speedFwd = speedFwd;
+		this.speedLeft = speedLeft;
+		this.desiredSpeedFwd = desiredSpeedFwd;
+		this.desiredSpeedLeft = desiredSpeedLeft;
+
+		if (Enabled) {
+
+			Vector3D gravity = -Vector3D.Normalize(cockpit.GetNaturalGravity());
+			pitch = Helpers.NotNan(Math.Acos(Vector3D.Dot(cockpit.WorldMatrix.Forward, gravity)) * Helpers.radToDeg);
+			roll = Helpers.NotNan(Math.Acos(Vector3D.Dot(cockpit.WorldMatrix.Right, gravity)) * Helpers.radToDeg);
+
+			// "smart delay" : if the pilot is actively trying to move the ship, don't auto-level
+			// otherwise, auto-level after a short delay
+
+			if (cockpit.MoveIndicator.Length() > 0.0f || cockpit.RotationIndicator.Length() > 0.0f)  {
+
+				desiredPitch = -(pitch - 90);
+				desiredRoll = (roll - 90);
+				gyroController.SetGyroOverride(false);
+				timer = 0;
+
+			} else if (timer > delay) {
+
+				// After the delay, auto-level the ship
+
+				// The desired pitch and roll are based on the ship's current velocity
+				// An atan function is used to scale the desired pitch and roll to the max pitch and roll values
+
+				gyroController.SetGyroOverride(true);
+				desiredPitch = Math.Atan((speedFwd-desiredSpeedFwd) / gyroResponsiveness) / Helpers.halfPi * maxAngle;
+				desiredRoll = Math.Atan((speedLeft-desiredSpeedLeft) / gyroResponsiveness) / Helpers.halfPi * maxAngle;
+
+				Matrix cockpitOrientation;
+				cockpit.Orientation.GetMatrix(out cockpitOrientation);
+				var quatPitch = Quaternion.CreateFromAxisAngle(cockpitOrientation.Left, (float)(desiredPitch * Helpers.degToRad));
+				var quatRoll = Quaternion.CreateFromAxisAngle(cockpitOrientation.Backward, (float)(desiredRoll * Helpers.degToRad));
+				var reference = Vector3D.Transform(cockpitOrientation.Down, quatPitch * quatRoll);
+
+				gyroController.SetTargetOrientation(reference, cockpit.GetNaturalGravity());
+
+				gyroController.Tick();
+
+			} else {
+				timer++;
+			}
+		}
+	}
+
+	public string DebugString() {
+		string str = "[AUTO LEVELER]";
+		str += "\nFwd :" + speedFwd.ToString("000.0") + "(" + desiredSpeedFwd.ToString("000.0") + ")";
+		str += "\nLeft:" + speedLeft.ToString("000.0") + "(" + desiredSpeedLeft.ToString("000.0") + ")";
+		str += "\npitch:" + Math.Round(90-pitch,2)+" roll:" + Math.Round(roll-90,2) + "max:"+Math.Round(maxAngle,2);
+		
+		return str;
+	}
+
+	public double MaxAngle() {
+		return maxAngle;
+	}
+
+
+}
+
+/// <summary>
+/// Handles the downward-facing cameras to scan for terrain slopes and altitude
+/// See tech doc §7
+/// </summary>
+public class GroundRadar {
+
+	public bool valid = false;
+	public bool exists = false;
+	public bool active=false;
+	public bool self_intersects = false;
+	public ScanMode mode;
+	public int alt_age=0;
+
+
+	const double RANGE_INCREMENT = 50;
+	const double START_RANGE = 1000;
+	const double MAX_TERRAIN_DISTANCE_SINGLE_RADAR = 180;
+	const double MAX_TERRAIN_DISTANCE_DOUBLE_RADAR = 200;
+	const double DOUBLE_RADAR_WIDE_SCAN_DISTANCE = 1000;
+	const double DOUBLE_RADAR_INITIAL_SCAN_DISTANCE = 5000;
+
+	const double MIN_SCAN_ANGLE = 2;
+	const double MAX_SCAN_ANGLE = 30;
+	const double GROUND_SCAN_HORIZ_LENGTH = 20;
+	const int MAX_SCAN_PACER = 0;
+	const double HORIZ_DEADZONE = 3;
+	const double HORIZ_MAX_SPEED = 20;
+
+
+	readonly double RADAR_MAX_RANGE;
+	readonly double SPEED_SCALE;
+	readonly double MAX_TERRAIN_DIST;
+
+	double max_dist, range;
+	
+	MyDetectedEntityInfo radar_return;
+	
+	double d_fwd, d_rear, d_left, d_right,d_fwd_wide, d_rear_wide, d_left_wide, d_right_wide, d_fwd_left, d_fwd_right, d_rear_left, d_rear_right;
+	double angle=1, double_angle=1, diag_angle=1;
+	double dz=HORIZ_DEADZONE;
+	bool double_radar;
+	int scan_step = 0;
+	int scan_pacer = 0;
+
+
+	Vector3D hitpos;
+	IMyCameraBlock altitudeRadar;
+	IMyCameraBlock terrainRadar;
+
+	public GroundRadar(List<IMyTerminalBlock> radars, double max_range, double speed_scale) {
+		if (radars.Count == 0) {
+			exists = false;
+			mode = ScanMode.NoRadar;
+		} else if (radars.Count == 1) {
+			// If only one radar is available, use it for both altitude and terrain
+			altitudeRadar = radars[0] as IMyCameraBlock;
+			terrainRadar = radars[0] as IMyCameraBlock;
+			MAX_TERRAIN_DIST = MAX_TERRAIN_DISTANCE_SINGLE_RADAR;
+			double_radar = false;
+			exists = true;
+			mode = ScanMode.SingleStandby;
+		} else {
+			// If two or more radars are available, use the first one for altitude and the second one for terrain
+			altitudeRadar = radars[0] as IMyCameraBlock;
+			terrainRadar = radars[1] as IMyCameraBlock;
+			MAX_TERRAIN_DIST = MAX_TERRAIN_DISTANCE_DOUBLE_RADAR;
+			double_radar = true;
+			exists = true;
+			mode = ScanMode.DoubleStandby;
+		}
+		
+		RADAR_MAX_RANGE = max_range;
+		SPEED_SCALE = speed_scale;
+	}
+
+	public void DisableRadar() {
+		if (!exists) return;
+
+		altitudeRadar.EnableRaycast = false;
+		terrainRadar.EnableRaycast = false;
+
+		d_fwd = d_rear = d_left = d_right = MAX_TERRAIN_DIST;
+		d_fwd_wide = d_rear_wide = d_left_wide = d_right_wide = MAX_TERRAIN_DIST;
+		d_fwd_left = d_fwd_right = d_rear_left = d_rear_right = MAX_TERRAIN_DIST;
+
+		valid = false;
+		active = false;
+	}
+
+	public void StartRadar() {
+		if (!exists) return;
+
+		range = START_RANGE;
+		altitudeRadar.EnableRaycast = true;
+		terrainRadar.EnableRaycast = true;
+		alt_age=0;
+
+		d_fwd = d_rear = d_left = d_right = MAX_TERRAIN_DIST;
+		d_fwd_wide = d_rear_wide = d_left_wide = d_right_wide = MAX_TERRAIN_DIST;
+		d_fwd_left = d_fwd_right = d_rear_left = d_rear_right = MAX_TERRAIN_DIST;
+
+		active = true;
+	}
+
+	public void ScanForAltitude(double pitch, double roll) {
+		if (!exists) return;
+
+		if (altitudeRadar.CanScan(range)) {
+
+			radar_return = altitudeRadar.Raycast(range,(float)-pitch,(float)-roll);
+
+			if ((radar_return.Type ==  MyDetectedEntityType.Planet || radar_return.Type == MyDetectedEntityType.LargeGrid) && radar_return.HitPosition.HasValue) {
+
+				// If we have a return (either a planet, or a large grid (landing pad, silo)), adjust range
+				valid = true;
+				range = GetDistance()+RANGE_INCREMENT;
+				alt_age = 0;
+				
+			} else {
+
+				// If we have no return, invalidate the previous return and increase the scan range
+				valid = false;
+				range = Math.Min(range*2,RADAR_MAX_RANGE);
+			}
+		}
+	}
+
+	public void IncrementAltAge() {
+		alt_age++;
+	}
+
+	public double GetDistance() {
+		if (!exists) return 1e6;
+		
+		if (valid) {
+			hitpos = radar_return.HitPosition.Value; // Updated when the radar has a return
+			Vector3D mypos = altitudeRadar.GetPosition(); // Always updated
+			return VRageMath.Vector3D.Distance(hitpos,mypos);
+		} else {
+			return 1e6;
+		}
+	}
+
+	public void ScanTerrain(double pitch, double roll) {
+		if (!exists) {
+			mode = ScanMode.NoRadar;
+			return;
+		}
+
+		// Define the scan mode
+		if (double_radar) {
+
+			mode = ScanMode.DoubleStandby;
+			max_dist = Math.Min(GetDistance()*1.2+20,DOUBLE_RADAR_INITIAL_SCAN_DISTANCE);
+			if (valid && GetDistance() < max_dist)
+				mode = (GetDistance() < DOUBLE_RADAR_WIDE_SCAN_DISTANCE) ? ScanMode.DoubleWide : ScanMode.DoubleEarly;
+
+		} else {
+
+			mode = ScanMode.SingleStandby;
+			max_dist = MAX_TERRAIN_DIST;
+			if (valid && GetDistance() < max_dist) 
+				mode = ScanMode.SingleNarrow;
+		}
+
+		double scan_angle_raw = Math.Atan(GROUND_SCAN_HORIZ_LENGTH/GetDistance())*Helpers.radToDeg;
+
+		angle=Helpers.SatMinMax(scan_angle_raw,MIN_SCAN_ANGLE,MAX_SCAN_ANGLE);
+		diag_angle=Helpers.SatMinMax(scan_angle_raw*1.414,MIN_SCAN_ANGLE,MAX_SCAN_ANGLE);
+		double_angle=Helpers.SatMinMax(scan_angle_raw*2,MIN_SCAN_ANGLE,MAX_SCAN_ANGLE);
+
+		// Perform the scan
+
+		if (mode == ScanMode.SingleNarrow || mode == ScanMode.DoubleEarly || mode == ScanMode.DoubleWide) {
+
+			if (terrainRadar.CanScan(2 * max_dist) && scan_pacer >= MAX_SCAN_PACER) {
+
+				if (mode == ScanMode.DoubleEarly || mode == ScanMode.DoubleWide) {
+
+					if (scan_step==0) {
+						self_intersects = false;
+						self_intersects = ScanPair(angle, 0, pitch, roll, max_dist, out d_fwd, out d_rear);
+						scan_step++;
+
+					} else if (scan_step==1) {
+						self_intersects = ScanPair(0, -angle, pitch, roll, max_dist, out d_left, out d_right);
+						scan_step++;
+
+					} else if (scan_step==2) {
+						if (mode == ScanMode.DoubleWide)
+							self_intersects = ScanPair(double_angle, 0, pitch, roll, max_dist, out d_fwd_wide, out d_rear_wide);
+						scan_step++;
+						
+					} else if (scan_step==3) {
+						if (mode == ScanMode.DoubleWide)
+							self_intersects = ScanPair(0, -double_angle, pitch, roll, max_dist, out d_left_wide, out d_right_wide);
+						scan_step++;
+					} else if (scan_step==4) {
+						if (mode == ScanMode.DoubleWide)
+							self_intersects = ScanPair(diag_angle, -diag_angle, pitch, roll, max_dist, out d_fwd_left, out d_rear_right);
+						scan_step++;
+					} else if (scan_step==5) {
+						if (mode == ScanMode.DoubleWide)
+							self_intersects = ScanPair(diag_angle, diag_angle, pitch, roll, max_dist, out d_fwd_right, out d_rear_left);
+						scan_step = 0;
+					}
+				
+				} else {
+					// SingleNarrow
+					if (scan_step==0) {
+
+						self_intersects = false;
+						self_intersects = ScanPair(angle, 0, pitch, roll, max_dist, out d_fwd, out d_rear);
+						scan_step++;
+
+					} else if (scan_step==1) {
+
+						self_intersects = ScanPair(0, -angle, pitch, roll, max_dist, out d_left, out d_right);
+						scan_step=0;
+					} 
+				}
+				scan_pacer = 0;
+			} else {
+				scan_pacer++;
+			}
+
+		} else {
+			d_fwd = d_rear = d_left = d_right = MAX_TERRAIN_DIST;
+			d_fwd_wide = d_rear_wide = d_left_wide = d_right_wide = MAX_TERRAIN_DIST;
+			d_fwd_left = d_fwd_right = d_rear_left = d_rear_right = MAX_TERRAIN_DIST;
+		}
+	}
+
+	private double ScanDir(double pitch, double yaw, double max_range) {
+
+		if (terrainRadar.CanScan(max_range)) {
+			
+			MyDetectedEntityInfo temp_return = terrainRadar.Raycast(max_range, (float)pitch, (float)yaw);
+
+			if ((temp_return.Type ==  MyDetectedEntityType.Planet || temp_return.Type == MyDetectedEntityType.LargeGrid) && temp_return.HitPosition.HasValue) {
+				return VRageMath.Vector3D.Distance(temp_return.HitPosition.Value , terrainRadar.GetPosition());
+			} else if (temp_return.EntityId == terrainRadar.CubeGrid.EntityId) {
+				return -1;
+			} else {
+				return max_range;
+			}
+
+		} else {
+			return max_range;
+		}
+	}
+
+	private bool ScanPair(double scan_pitch, double scan_yaw, double ship_pitch, double ship_roll, double max_range, out double dpos, out double dneg) {
+		dpos = ScanDir(scan_pitch-ship_pitch,scan_yaw-ship_roll,max_range);
+		dneg = ScanDir(-scan_pitch-ship_pitch,-scan_yaw-ship_roll,max_range);
+		if (dpos < 0 || dneg < 0) {
+			dpos = dneg = MAX_TERRAIN_DIST;
+			return true;
+		}
+		return false;
+	}
+
+	public double RecommandFwdSpeed() {
+		if (!exists) return 0;
+
+		return RecommendSpeed(d_fwd, d_rear, d_fwd_wide, d_rear_wide,
+								d_fwd_left, d_fwd_right, d_rear_left, d_rear_right);
+	}
+
+	public double RecommandLeftSpeed() {
+		if (!exists) return 0;
+
+		return RecommendSpeed(d_left, d_right, d_left_wide, d_right_wide,
+								d_fwd_left, d_rear_left, d_fwd_right, d_rear_right);
+	}
+
+	private double RecommendSpeed(double d_pos, double d_neg, double d_wide_pos, double d_wide_neg, double d_diag1, double d_diag2, double d_diag3, double d_diag4) {
+
+		double alt = GetDistance();
+		double maxspeed = Math.Min(alt,HORIZ_MAX_SPEED);
+
+		dz = Helpers.Interpolate(500,2000,HORIZ_DEADZONE,0,alt);
+
+		double vbase = Math.Atan2(d_pos - d_neg , Math.Tan(Helpers.degToRad*angle)*(d_pos + d_neg));
+		double vpos, vpos_raw;
+
+		if (double_radar && mode == ScanMode.DoubleWide) {
+
+			double vwide = Math.Atan2(d_wide_pos - d_wide_neg,  Math.Tan(Helpers.degToRad*double_angle)*(d_wide_pos + d_wide_neg));
+			
+			double vdiag = Math.Atan2(d_diag1 + d_diag2 - d_diag3 - d_diag4 , Math.Tan(Helpers.degToRad*diag_angle)*(d_diag1 + d_diag2 + d_diag3 + d_diag4));
+			vpos_raw = vbase + vwide + vdiag;
+
+			if (d_wide_pos < d_pos && vpos_raw>0 && d_pos > 0) 
+				vpos_raw *= d_wide_pos/d_pos;
+
+			if (d_wide_neg < d_neg && vpos_raw<0 && d_neg > 0) 
+				vpos_raw *= d_wide_neg/d_neg;
+
+			if (d_pos < alt && vpos_raw>0)
+				vpos_raw *= d_pos/alt;
+
+			if (d_neg < alt && vpos_raw<0)
+				vpos_raw *= d_neg/alt;
+
+			vpos = vpos_raw * SPEED_SCALE;
+
+
+		} else {
+			vpos = vbase * 3 * SPEED_SCALE;
+		}
+		
+		return Helpers.MaxAbs(Helpers.DeadZone(vpos, dz), maxspeed);
+	}
+
+	
+
+	public string AltitudeDebugString() {
+		if (!exists) return "[NO RADAR !]";
+		
+		return "[RADAR]"
+		+ "\nRange:" + range.ToString("000.0") + "m"
+		+ " Avail:" + altitudeRadar.AvailableScanRange.ToString("000.0") + "m"
+		+ "\nReturn type: " + radar_return.Type
+		+ " Age: " + alt_age;
+
+	}
+
+	public string TerrainDebugString() {
+		if (!exists) return "[NO RADAR !]";
+
+		return "[TERRAIN]"
+			+ "\nAv range: " + terrainRadar.AvailableScanRange.ToString("00000") + "m"
+			+ " Scan: " + angle.ToString("00.0") + "°/" + double_angle.ToString("00.0") + " Dist: " + max_dist.ToString("000.0") + "m"
+			+ "\nFw: " + d_fwd.ToString("000.0") + "/" + d_fwd_wide.ToString("000.0")
+			+ " Rr: " + d_rear.ToString("000.0") + "/" + d_rear_wide.ToString("000.0")
+			+ " Fw spd: " + RecommandFwdSpeed().ToString("00.0")
+			+ "\nLf: " + d_left.ToString("000.0") + "/" + d_left_wide.ToString("000.0")
+			+ " Rt: " + d_right.ToString("000.0") + "/" + d_right_wide.ToString("000.0")
+			+ " Lf spd: " + RecommandLeftSpeed().ToString("00.0");
+	}
+
+	public List<string> LogNames() {
+		return new List<string>{"d_fwd", "d_rear", "d_left", "d_right"};
+	}
+
+	public List<double> LogValues() {
+		return new List<double>{d_fwd, d_rear, d_left, d_right};
+	}
+
+
+}
+
+/// <summary>
+/// See tech doc §10
+/// </summary>
+public class HorizontalThrusters {
+	ShipBlocks ship;
+	PIDController fwdPID,leftPID;
+	IMyShipController cockpit;
+	readonly int DELAY;
+	int timer;
+
+	public HorizontalThrusters(ShipBlocks ship, int delay, double KP, double KI, double KD, double AImax) {
+		this.ship = ship;
+
+		this.cockpit = ship.ship_ctrller;
+		this.DELAY = delay;
+
+		fwdPID = new PIDController(KP,KI,KD,-AImax,AImax,0.5,1);
+		leftPID = new PIDController(KP,KI,KD,-AImax,AImax,0.5,1);
+	}
+
+	public void Disable() {
+		ship.fwdThr.Disable();
+		ship.rearThr.Disable();
+		ship.leftThr.Disable();
+		ship.rightThr.Disable();
+
+		fwdPID.Reset();
+		leftPID.Reset();
+	}
+
+	public void Tick(double fwdSpeed, double leftSpeed, double fwdSpeedSetpoint, double leftSpeedSetpoint, double shipMass, bool deadZone) {
+
+		// If the player provides inputs, disable the override
+		if (cockpit.MoveIndicator.Length() > 0.0f || cockpit.RotationIndicator.Length() > 0.0f)  {
+
+			Disable();
+			timer = 0;
+
+		} else if (timer > DELAY) {
+
+			// Compute difference between speed and setpoint
+			double fwdDelta  = fwdSpeedSetpoint  - fwdSpeed;
+			double leftDelta = leftSpeedSetpoint - leftSpeed;
+			double dz = deadZone ? 0.05 :0;
+
+			// Compute the thrust to apply to the ship to correct the speed difference, using the speed ratio
+			fwdPID.UpdatePID(fwdDelta);
+			leftPID.UpdatePID(leftDelta);
+
+			// Apply the thrust to the thrusters, considering the sign of the difference
+			ship.fwdThr.ApplyThrust(Helpers.DeadZone(fwdPID.output,dz)*shipMass,0,0);
+			ship.rearThr.ApplyThrust(Helpers.DeadZone(-fwdPID.output,dz)*shipMass,0,0);
+			ship.leftThr.ApplyThrust(Helpers.DeadZone(leftPID.output,dz)*shipMass,0,0);
+			ship.rightThr.ApplyThrust(Helpers.DeadZone(-leftPID.output,dz)*shipMass,0,0);
+
+		} else {
+			timer++;
+		}
+
+	}
+
+	public void UpdateThrust() {
+		ship.fwdThr.UpdateThrust();
+		ship.rearThr.UpdateThrust();
+		ship.leftThr.UpdateThrust();
+		ship.rightThr.UpdateThrust();
+	}
+
+	public string DebugString() {
+
+		string str = "[FWD PID]: " + fwdPID.DebugString();
+		str += "\n[LEFT PID]: " + leftPID.DebugString();
+		return str;
+	}
+
+	public List<string> LogNames() {
+		return new List<string>{"fwd_pid_output","left_pid_output"};
+	}
+
+	public List<double> LogValues() {
+		return new List<double>{fwdPID.output,leftPID.output};
+	}
+}
+
+/// <summary>
+/// See tech doc §11
+/// </summary>
+public class ThrGroup {
+	public double max_hthrust, max_ithrust, max_athrust; 				// Newtons
+	public double eff_hthrust, eff_ithrust, eff_athrust; 				// Newtons
+	public double current_hthrust, current_ithrust, current_athrust; 	// Newtons
+	public float atmo_override, ion_override, h2_override;
+	public double [] ithrust_density = new double[11];
+	public double [] athrust_density = new double[11];
+
+	List<IMyThrust> athrusters, ithrusters, hthrusters;
+
+	double athr_wanted, ithr_wanted, hthr_wanted;
+
+
+	public ThrGroup(List<IMyThrust> thrusters) {
+
+		athrusters = new List<IMyThrust>();
+		ithrusters = new List<IMyThrust>();
+		hthrusters = new List<IMyThrust>();
+
+		// Separate thruster by type
+		// Add custom/modded thrusters here if needed
+		foreach (var thr in thrusters) {
+			string name = thr.DefinitionDisplayNameText.ToString();
+			if (name.Contains("Hydrogen") || name.Contains("Epstein") || name.Contains("RCS")) hthrusters.Add(thr);
+			else if (name.Contains("Ion") || name.Contains("Prototech")) ithrusters.Add(thr);
+			else if (name.Contains("Atmo")) athrusters.Add(thr);
+		}
+	}
+
+	public void UpdateThrust() {
+
+		eff_athrust = eff_ithrust = eff_hthrust = 0;
+		max_athrust = max_ithrust = max_hthrust = 0;
+		current_athrust = current_ithrust = current_hthrust = 0;
+
+		foreach (IMyThrust athr in athrusters) {
+			if (!athr.Closed && athr.IsWorking) {
+				eff_athrust 	+= athr.MaxEffectiveThrust;
+				max_athrust 	+= athr.MaxThrust;
+				current_athrust += athr.CurrentThrust;
+			}
+		}
+		
+		foreach (IMyThrust ithr in ithrusters) {
+			if (!ithr.Closed && ithr.IsWorking) {
+				eff_ithrust 		+= ithr.MaxEffectiveThrust;
+				max_ithrust 		+= ithr.MaxThrust;
+				current_ithrust 	+= ithr.CurrentThrust;
+			}
+		} 
+
+		foreach (IMyThrust hthr in hthrusters) {
+			if (!hthr.Closed && hthr.IsWorking ) {
+				eff_hthrust 		+= hthr.MaxEffectiveThrust;
+				max_hthrust 		+= hthr.MaxThrust;
+				current_hthrust 	+= hthr.CurrentThrust;
+			}
+		} 
+	}
+
+	public void ApplyThrust (double thr_wanted, double min_athrust, double min_ithrust) {
+		
+		athr_wanted = Helpers.SatMinMax(thr_wanted,min_athrust,eff_athrust);
+		ithr_wanted = Helpers.SatMinMax(thr_wanted-athr_wanted,min_ithrust, eff_ithrust);
+		hthr_wanted = thr_wanted-ithr_wanted-athr_wanted;
+		
+		// Compute the overrides with a small dead zone
+
+		// By default, atmos are overriden to the max so that they update their max effective thrust (game bug?)
+		
+		if (eff_athrust > 0) {
+			atmo_override = (float)Helpers.SatMinMax(athr_wanted/eff_athrust,0,1);
+			if (atmo_override < 0.01) atmo_override = 0;
+		} else {
+			atmo_override = 1;
+		}
+		
+		if (eff_ithrust > 0) {
+			ion_override = (float)Helpers.SatMinMax(ithr_wanted/eff_ithrust,0,1);
+			if (ion_override < 0.01) ion_override = 0;
+		} else {
+			ion_override = 0;
+		}
+
+		if (eff_hthrust > 0) {
+			h2_override = (float)Helpers.SatMinMax(hthr_wanted/eff_hthrust,0,1);
+			if (h2_override < 0.01) h2_override = 0;
+		} else {
+			h2_override = 0;
+		}
+		
+		// Apply the thrust override to thrusters
+		
+		foreach (IMyThrust alifter in athrusters) {
+			alifter.Enabled = true;
+			alifter.ThrustOverridePercentage = atmo_override;
+		}   
+
+		foreach (IMyThrust ilifter in ithrusters) {
+			ilifter.Enabled = true;
+			ilifter.ThrustOverridePercentage = ion_override;
+		}  		
+
+		foreach (IMyThrust hlifter in hthrusters) {
+			hlifter.Enabled = true;
+			hlifter.ThrustOverridePercentage = h2_override;  
+		} 
+
+	}
+
+	public void Disable() {
+		foreach (IMyThrust alifter in athrusters) {
+			alifter.ThrustOverride = 0;
+		}   
+
+		foreach (IMyThrust ilifter in ithrusters) {
+			ilifter.ThrustOverride = 0;
+		}  		
+
+		foreach (IMyThrust hlifter in hthrusters) {
+			hlifter.ThrustOverride = 0;
+		} 
+	}
+
+	// Find the worst atmo density (minimizes atmo + ion thrust)
+	public double WorstDensity()
+	{
+		double d0 = 0.43 / 1.43;
+		double C = 1.43 * max_athrust - 0.8 * max_ithrust;
+
+		if (C > 0)
+			return d0;
+		else if (C < 0)
+			return 1.0;
+		else
+			return d0; // ou n'importe quelle valeur entre d0 et 1
+	}
+
+	public double AtmoThrustForAtmoDensity(double density) {
+		return Math.Max(max_athrust * (Math.Min(density, 1)*1.43f - 0.43f),0);
+	}
+
+	public double IonThrustForAtmoDensity(double density) {
+		return max_ithrust * (1-0.8f*Math.Min(density, 1));
+	}
+
+	public void UpdateDensitySweep() {
+		for (int i=0; i<11; i++) {
+			ithrust_density[i] = IonThrustForAtmoDensity(i/10.0);
+			athrust_density[i] = AtmoThrustForAtmoDensity(i/10.0);
+		}
+	}
+
+	public string Inventory() {
+		return "(" + ithrusters.Count + " Ion, " + athrusters.Count + " A, " + hthrusters.Count + " H)";
+	}
+
+	public string DebugString() {
+		return "[OVERRIDE] A:" +atmo_override.ToString("+0.00;-0.00") + " I:" +ion_override.ToString("+0.00;-0.00") + " H:" +h2_override.ToString("+0.00;-0.00") + " WD"+WorstDensity().ToString("0.00");
+	}
+
+}
+
+/// <summary>
+/// See tech doc §12.3
+/// </summary>
+public class RunTimeCounter {
+
+	readonly Program program;
+
+	const int NB_TIMES = 10;
+	RollingBuffer t1_buffer = new RollingBuffer(NB_TIMES);
+	RollingBuffer t10_buffer = new RollingBuffer(NB_TIMES);
+	RollingBuffer t100_buffer = new RollingBuffer(NB_TIMES);
+
+	public RunTimeCounter(Program program) {
+		this.program = program;
+	}
+
+	public void Count(bool ranTick1,bool ranTick10,bool ranTick100) {
+		double runtime = program.Runtime.LastRunTimeMs;
+		
+		if (ranTick1 && !ranTick10 && !ranTick100) t1_buffer.Add(runtime);
+
+		if (ranTick10 && !ranTick100) t10_buffer.Add(runtime);
+		
+		if (ranTick100) t100_buffer.Add(runtime);
+	}
+
+	public string RunTimeString()
+	{
+		string s="";
+		s += "Avg t1:" + t1_buffer.Average().ToString("0.00")+"ms";
+		s += ", t10: " + t10_buffer.Average().ToString("0.00")+"ms";
+		s += ", t100:"+t100_buffer.Average().ToString("0.00")+"ms";
+		s += "\nMax t1:" + t1_buffer.Max().ToString("0.00") + "ms";
+		s += ", t10: " + t10_buffer.Max().ToString("0.00") + "ms";
+		s += ", t100:"+t100_buffer.Max().ToString("0.00")+"ms";
+
+		return s;
+	}
+
+	public List<string> LogNames() {
+		return new List<string>{"Avg t1","Avg t10","Avg t100","Max t1","Max t10","Max t100"};
+	}
+
+	public List<double> LogValues() {
+		return new List<double>{t1_buffer.Average(),t10_buffer.Average(),t100_buffer.Average(),t1_buffer.Max(),t10_buffer.Max(),t100_buffer.Max()};
+	}
+
 }
 
 
+/// <summary>
+/// Miscellaneous helper functions. See tech doc §12.4
+/// </summary>
+public class Helpers
+{
 
+	public static double NotNan(double val)
+	{
+		if (double.IsNaN(val))
+			return 0;
+		return val;
+	}
 
+	// The max value has priority, ie if min>max, the function returns max
 
+	public static double SatMinMax(double value, double min, double max) {
+		if (value > max) return max;
+		if (value < min) return min;
+		return value;
+	}
+
+	public static double MaxAbs(double value, double maxabs) {
+		return Math.Min(Math.Abs(value),maxabs) * Math.Sign(value);
+	} 
+
+	public static double Min3(double a, double b, double c) {
+		return Math.Min(a,Math.Min(b,c));
+	}
+
+	public static double Max3(double a, double b, double c) {
+		return Math.Max(a,Math.Max(b,c));
+	}
+
+	public static double DeadZone(double value, double deadzone) {
+		if (Math.Abs(value) < deadzone) {
+			return 0;
+		} else {
+			return value;
+		}
+	}
+
+	public static double Interpolate(double X1, double X2, double Y1, double Y2, double x) {
+		if (X1==X2) return Y1;
+		if (x <= X1) return Y1;
+		if (x >= X2) return Y2;
+
+		return Y1 + (Y2-Y1) * (x-X1) / (X2-X1);
+	}
+
+	public static double Mix(double a, double b, double ratio_of_a) {
+		double ratio = SatMinMax(ratio_of_a,0,1);
+		return a*(1-ratio) + b*ratio;
+	}
+
+	public static double g_to_ms2(double g) {
+		return g*9.81;
+	}
+
+	public static double ms2_to_g(double a) {
+		return a/9.81;
+	}
+
+	public static void Rectangle(MySpriteDrawFrame frame, float x1, float x2, float y1, float y2, VRageMath.RectangleF view, float thickness, VRageMath.Color color) {
+
+		float[] x = new float[4] {(x1+x2)/2, (x1+x2)/2, x1, x2};
+		float[] y = new float[4] {y1, y2, (y1+y2)/2, (y1+y2)/2};
+		float[] w = new float[4] {x2-x1, x2-x1, thickness, thickness};
+		float[] h = new float[4] {thickness, thickness, y2-y1, y2-y1};
+
+		for (int i=0; i<4; i++) {
+
+			MySprite s = MySprite.CreateSprite
+			(
+				"SquareSimple",
+				new Vector2(x[i],y[i]) + view.Position,
+				new Vector2(w[i],h[i])
+			);
+			s.Color = color;
+			frame.Add(s);
+
+		}
+	}
+
+	public static string FormatCompact(double value) {
+		if (Math.Abs(value) > 100) {
+			return value.ToString("000");
+		} else if (Math.Abs(value) > 10) {
+			return value.ToString("00.0");
+		} else {
+			return value.ToString("0.00");
+		}
+	}
+
+	public static string Truncate(string str, int maxLength) {
+		if (str.Length > maxLength) {
+			return str.Substring(0, maxLength);
+		}
+		return str;
+	}
+	
+	public const double halfPi = Math.PI / 2;
+	public const double radToDeg = 180 / Math.PI;
+	public const double degToRad = Math.PI / 180;
+}
+
+/// <summary>
+/// Records internal variables in CSV format. See tech doc §12.2
+/// </summary>
+public class Logger 
+{
+
+	List<string> names = new List<string>();
+	List<List<double>> records = new List<List<double>>();
+	int cnter;
+	int FACTOR;
+	double tstart=0;
+	bool allow;
+	
+
+	public Logger(List<string> names, int factor, bool allow) {
+		this.names = names;
+		this.FACTOR = factor;
+		this.allow = allow;
+	}
+
+	public void Clear() {
+		records.Clear();
+		cnter = 0;
+	}
+
+	public void Log(List<double> record) {
+		if (!allow) return;
+
+		if (cnter == 0) {
+			tstart = DateTime.Now.TimeOfDay.TotalMilliseconds;
+		}
+		if (cnter % FACTOR == 0) {
+			List<double> new_record = new List<double>();
+			new_record.Add(DateTime.Now.TimeOfDay.TotalMilliseconds-tstart);
+			new_record.AddRange(record);
+			records.Add(new_record);
+		}
+		cnter++;
+		
+	}
+
+	public string Output() {
+
+		// Format the output as a CSV
+		// First line : names of the columns
+		string output = "time(ms),";
+		foreach (string name in names) {
+			output += name + ",";
+		}
+		output += "\n";
+		
+		// Each line is a record
+		foreach (List<double> record in records) {
+			foreach (double value in record) {
+				output += value.ToString("0.00") + ",";
+			}
+			output += "\n";
+		}
+
+		return output;
+	}
+}
+
+public class MovingAverage {
+	
+	double[] values;
+	int index, size;
+	double sum;
+	
+	public MovingAverage(int set_size) {
+		values = new double[set_size];
+		index = 0;
+		size = set_size;
+		sum = 0;
+		for (int i=0; i<size; i++) {
+			values[i] = 0;
+		}
+	}
+	
+	public double AddValue(double value) {
+		sum -= values[index];
+		values[index] = value;
+		sum += value;
+		index = (index+1) % size;
+		return sum / size;
+	}
+
+	public double Get() {
+		return sum / size;
+	}
+	
+	public void Clear() {
+		sum = 0;
+		for (int i=0; i<size; i++) {
+			values[i] = 0;
+		}
+	}
+	
+}
+		
+
+public class RollingBuffer
+{
+	private double[] buffer;
+	private int index;
+
+	public RollingBuffer(int size)
+	{
+		buffer = new double[size];
+		index = 0;
+	}
+
+	public void Add(double item)
+	{
+		buffer[index] = item;
+		index = (index + 1) % buffer.Length;
+	}
+
+	public double[] GetBuffer()
+	{
+		return buffer;
+	}
+
+	public double Average()
+	{
+		return buffer.Average();
+	}
+
+	public double Max()
+	{
+		return buffer.Max();
+	}
+
+}
