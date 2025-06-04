@@ -1,4 +1,4 @@
-# Soft Landing Manager
+# Technical documentation for Soft Landing Manager
 
 ## 1. Intro/General
 
@@ -30,6 +30,49 @@ flowchart LR
     active -- off --> A
 ```
 ## 2.2 Tasks sequencing
+
+Parts of the script are executed at various iteration rates.
+
+### 2.2.2 Every tick (16ms)
+
+Only when the script is active (mode 1 and mode 2):
+- Update altitude based on most recent radar return
+- Update ship speeds (vertical and horizontal)
+- Compute vertical speed set point for the current altitude
+- Update vertical PID controller
+- Apply vertical thrust
+- Compute horizontal speed set points based on most recent terrain scan returns
+- Update horizontal PID controller
+- Apply horizontal thrust
+- Adjust ship pitch and roll (to stay level or to control horizontal speed)
+
+### 2.2.3 Every 10 ticks (160ms)
+
+- Measure local gravity
+- Compute ship weight
+- Update thrust capability for lifters
+- Update thrust capability for horizontal thrusters
+- Compute available lift-to-weight ratio
+- Select surface gravity used for further computation (§6)
+- Update lift-to-weight ratio target
+- Refresh displays
+- Refresh debug display
+- Manage timers
+- Manage panic parachutes
+
+In addition, in mode 1 and 2:
+- Use radar to measure altitude
+- Use radar to scan for terrain
+- Update landing profile
+
+### 2.2.4 Every 100 ticks (1,6s)
+
+- Update gravity estimate (§6).
+- Manage sound blocks
+- Update ship information (mass, inertia)
+- Update maximum gravity and warning
+- Update planet atmosphere
+- Update computation of ship thrust for all atmospheres
 
 ## 3. Speed set-point
 
