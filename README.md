@@ -234,7 +234,6 @@ If you don't use these, the game is much easier and you probably don't really ne
 
 #### I have an issue and want to ask for help
 Sure, but please help me help you. Give details to what is wrong, when it happens. Tell me or show screenshots of how your ship is set up, what the script says (in the menu for the programmable block, see below) when you compile it, what is shown on the main displays (LCD named "SLMdisplay") etc.
-
 ![PB Feedback 1](./img/PB_status1.jpg)
 ![PB Feedback 2](./img/PB_status2.jpg)
 ![PB Feedback 3](./img/PB_status3.jpg)
@@ -245,6 +244,7 @@ The script manages orientation based the ship controller it is using. Look at wh
 
 #### The script does not detect/use the thrusters correctly
 The script detects and uses thrusters relative to the orientation of the ship controller. See above.
+Use the programmable block display (as shown above) to see what thrusters are detected (Ion, Atmo, Hydro) for each direction. Thrusters used to go "up" are called "lifters" here.
 
 #### The landing profile keeps changing, the landing burn is not smooth
 Yes, it's recomputed in real time as the script updates its estimate of the planet radius, surface gravity, and atmosphere condition. If you can select an exact planet in the catalog, it will be much more stable.
