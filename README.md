@@ -234,6 +234,7 @@ If you don't use these, the game is much easier and you probably don't really ne
 
 #### I have an issue and want to ask for help
 Sure, but please help me help you. Give details to what is wrong, when it happens. Tell me or show screenshots of how your ship is set up, what the script says (in the menu for the programmable block, see below) when you compile it, what is shown on the main displays (LCD named "SLMdisplay") etc.
+
 ![PB Feedback 1](./img/PB_status1.jpg)
 ![PB Feedback 2](./img/PB_status2.jpg)
 ![PB Feedback 3](./img/PB_status3.jpg)
