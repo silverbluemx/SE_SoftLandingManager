@@ -233,7 +233,11 @@ If a warning sign appears, that means that view from the radar (ground-facing ca
 If you don't use these, the game is much easier and you probably don't really need the script. To be honest, I don't know, I haven't tested with vanilla Space Engineers.
 
 #### I have an issue and want to ask for help
-Sure, but please help me help you. Give details to what is wrong, when it happens. Tell me or show screenshots of how your ship is set up, what the script says (in the programmable block) when you compile it, what is shown on the main displays etc.
+Sure, but please help me help you. Give details to what is wrong, when it happens. Tell me or show screenshots of how your ship is set up, what the script says (in the menu for the programmable block, see below) when you compile it, what is shown on the main displays (LCD named "SLMdisplay") etc.
+![PB Feedback 1](./img/PB_status1.jpg)
+![PB Feedback 2](./img/PB_status2.jpg)
+![PB Feedback 3](./img/PB_status3.jpg)
+
 
 #### The script does not align the ship correctly
 The script manages orientation based the ship controller it is using. Look at what the script says (in the programmable block window) when you compile it. Does it say "Found a ship controller:" or "Using configured controller:" and if so, is the controller name the one you expect ? You can add "SLMref" in the name of the block to make sure the script uses the one you want, or modify the name "SLMref" in the code configuration to the name of the ship controller you want to use.
