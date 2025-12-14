@@ -35,7 +35,9 @@ If you're not using both of these, then the script won't work well but also is n
 - (optional) configure LCDs, timers, sound blocks etc. as needed, see below for the functions they provide
 - install the script in a programmable block
 - recompile the script to let it autoconfigure itself
-- (no longer needed with v2) ~~Install and configure on your ship an auto-levelling script such as flight assist or other~~ 
+- (no longer needed with v2) ~~Install and configure on your ship an auto-levelling script such as flight assist or other~~
+
+IMPORTANT : To use vanilla gravity (if not using Real Orbits for example), you need to change the configuration : gravityExponent = 7; instead of gravityExponent = 2; in the SLMConfiguration class
 
 ### Basic usage for landing (modes 1 and 2):
 - Move your ship to the edge of a planet gravity field
