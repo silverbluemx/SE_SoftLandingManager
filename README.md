@@ -19,12 +19,14 @@ If you're not using both of these, then the script won't work well but also is n
 - computes and follows an optimal vertical speed profile for the descent
 - prioritizes electric thrusters (atmospheric and ion) before using hydrogen ones, to save on H2
 - uses a radar (raycasts from a downward facing camera) to measure your altitude way above what the game normally provides (useful for planets with gravity extending more than 100km from them!)
-- (new in v2) keeps your ship level (copy of Flight Assist "Hover Smart" mode)
-- (new in v2) scans the terrain below the ship and guides it down the slopes to find flat terrain for a safe landing
-- (updated in v2) computes and show the maximum gravity that your ship can handle for all atmosphere densities
+- keeps your ship level (copy of Flight Assist "Hover Smart" mode)
+- scans the terrain below the ship and guides it down the slopes to find flat terrain for a safe landing
+- computes and show the maximum gravity that your ship can handle for all atmosphere densities
 - provides an estimate of the surface gravity for the planet
 - warns if the ship is not capable of landing on the planet
 - automatically deploy parachutes if about to crash
+- (new in v2.1) lets you safety fly ships without any horizontal thruster (like helicopters) in mode3 (hover mode)
+- (beta feature in v2.1) autopilot with speed and altitude hold function
 
 
 ### Installation:
@@ -35,12 +37,27 @@ If you're not using both of these, then the script won't work well but also is n
 - recompile the script to let it autoconfigure itself
 - (no longer needed with v2) ~~Install and configure on your ship an auto-levelling script such as flight assist or other~~ 
 
-### Basic usage:
+### Basic usage for landing (modes 1 and 2):
 - Move your ship to the edge of a planet gravity field
 - Activate mode1 or mode2 to have the script manage your descent
 - (optionnally) Set vacuum or atmosphere mode, or select a planet to optimize the descent profile
 - Steer your ship to land on flat ground or let it manage it automatically (you can provide inputs at any time that will override automatic horizontal guidance)
 - Once landed, check if the script automatically switched to mode0 (off), if not then turn it off yourself
+
+### Basic usage for hover mode (mode 3):
+- Activate mode3. The script turns inertia dampers on and levels the ship.
+- Use your forward/back/left/right keys to fly.
+- You're in control of the vertical direction in the usual way.
+- When a key is pressed, the scripts makes the ship fly in that direction. When released, it stops.
+- Use **angleswitch** and **thrustersswitch** (see below) to chose if tilting and/or thrusters are used (default = both)
+- The speed depends on altitude. Close to the ground, the safe speed is low, ideal to fine-tune landing on a connector. At higher altitudes, it lets you fly up to 200 m/s.
+
+### Basic usage for autopilot mode (mode 4):
+- Activate mode3. By default it sets the target 50m above ground, with no horizontal speed.
+- Use the commands (see below) to increase/decrease the speed and altitude targets.
+- The forward/backward key can also be used to change the speed.
+- The script limits itself to a safe speed close to ground. When the speed setpoint blinks, the safe speed limit is in effect. Climb higher to fly faster.
+- Switch to sea-level reference to fly straight, or ground-level reference to follow terrain
 
 ### Command line arguments:
 
@@ -52,7 +69,8 @@ Basic commands
 - **mode2** : activate a faster descent mode that fires thrusters only when needed
 	It is possible to switch between mode1 and mode2 during the descent, for example use mode2 to
 	let the ship pick up speed, and then switch to mode1 to try and maintain that speed using ion thrusters
-- **mode3** : the script only manages autoleveling (copy of Flight Assist "Hover Smart" mode)
+- **mode3** : the script manages autoleveling (copy of Flight Assist "Hover Smart" mode) and lets you safety fly ships without any horizontal thruster (like helicopters) in mode3
+- **mode4** : (beta feature) autopilot with altitude hold (relative to ground or sea level) and speed hold
 
 Advanced commands : planet surface conditions
 
@@ -68,7 +86,17 @@ Advanced commands : guidance during descent for terrain avoidance
 
 Advanced commands : other
 
-- **leveloff**, **levelon** and **levelswitch** same for the forward/back/left/right thrusters
+- **leveloff**, **levelon** and **levelswitch** to manage auto leveling
+
+Advanced commands for mode 4 autopilot (beta feature)
+
+- **altup** : raise altitude target (by 10 m)
+- **altdown** : lower altitude target (by 10 m)
+- **speedup** : increase speed target (by 10 m/s)
+- **speeddown** : reduce speed target (by 10 m/s)
+- **altgnd** : set the altitude target related to ground level
+- **altsl** : set the altitude target related to sea level
+- **altswitch** : switch between ground and sea level reference (based on the actual altitude that the ship is at)
 
 All commands can be combined, ex : **mode1mars**, **mode2atmo**, **mode1angleoffthrusterson** etc.
 
@@ -113,7 +141,7 @@ All vanilla planets are included. Modded planets can be added to the *PlanetCata
 
 #### General disposition
 
-The script provides all necessary information on one display layout shown below, with five main parts:
+The script provides all necessary information on one display layout shown below, with five main parts. On smaller screens, some of the information is omitted for readability.
 
 ![Constitution of the main display](./img/IMG00.png)
 
@@ -197,6 +225,8 @@ Possible states for the source are :
 
 Typically, as the script starts up and initializes, you'll see this sequence : **Disabled** > **Gravity** > **Alt/grav** > **Profile** > **Final**.
 
+In the autopilot mode (mode 4), the state is **Alt Hold**.
+
 #### 5 : Horizontal mode indication with horizontal speed visualisation
 
 This also shows you two lines of information:
@@ -227,10 +257,19 @@ If a warning sign appears, that means that view from the radar (ground-facing ca
 
 ![Constitution of the main display](./img/IMG08.png)
 
+In the hover mode (mode 3), the state is **Hover Mode**.
+
+In the autopilot mode (mode 4), the state is **Speed Hold**.
+
+In both mode 3 and mode 4, the exact value of the speed target is shown in cyan (light blue). It blinks if the target if above the safe speed for the current altitude.
+
+![Constitution of the main display](./img/IMG20.jpg)
+
 ## FAQ/Troubleshooting
 
 #### Does it really need Real Orbits and a speed mod ?
-If you don't use these, the game is much easier and you probably don't really need the script. To be honest, I don't know, I haven't tested with vanilla Space Engineers.
+If you don't use these, the game is much easier and you probably don't really need the script. That said, yes, it works. To use vanilla gravity, you need to change the configuration :
+`gravityExponent = 7;` instead of `gravityExponent = 2;` in the `SLMConfiguration` class
 
 #### I have an issue and want to ask for help
 Sure, but please help me help you. Give details to what is wrong, when it happens. Tell me or show screenshots of how your ship is set up, what the script says (in the menu for the programmable block, see below) when you compile it, what is shown on the main displays (LCD named "SLMdisplay") etc.
@@ -261,6 +300,9 @@ The script estimates the safe tilt angle based on the ship rotational inertia an
 
 #### I don't want the terrain avoidance function ! It was better before
 It's possible to disable it using the command arguments (see above) but to be less annoying, change both `terrainAvoidGyro = true;` and `terrainAvoidThrusters = true;` to `false` in the `SLMConfiguration` class, so that it starts disabled by default.
+
+#### The autopilot does not work perfectly
+Yes, the autopilot (mode 4) is a beta feature. More work remains on this one. That said constructive feedback will be appreciated.
 
 #### The script makes the game lag
 Yes, I've noticed some spikes in the script execution time (>1ms) for the terrain scanning function. It's under investigation.

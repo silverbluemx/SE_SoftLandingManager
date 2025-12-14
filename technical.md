@@ -65,6 +65,9 @@ In addition, in mode 1 and 2:
 - Use radar to scan for terrain
 - Update landing profile
 
+In addition, in mode 4:
+- Scan the terrain forward of the ship
+
 ### 2.2.4 Every 100 ticks (1,6s)
 
 - Update gravity estimate (§6).
@@ -225,23 +228,30 @@ This function is implemented in the class `EarlySurfaceGravityEstimator`
 
 ## 6.2 Details
 
-In Space Engineers (with the Real Orbits mod!) gravity works as follows:
+### 6.2.1 Equation to solve
+
+In Space Engineers each planet has a radius value (selected when the planet is spawned) and a unitless hillparam value related to the planet definition. Then gravity works as follows:
 - below $radius * hillparam$
 $$
-grav(alt_{sealevel}) = grav_{sealevel} ;
+grav(alt_{ASL}) = grav_{sealevel} ;
 $$
 - above $radius * hillparam$
 $$
-grav(alt_{sealevel}) = grav_{sealevel}  * {(\frac{MaxRadius}{alt_{sealevel}+radius})}^2;
+grav(alt_{ASL}) = grav_{sealevel}  * {(\frac{MaxRadius}{alt_{ASL}+radius})}^{EXP};
 $$
 with :
-$$
-MaxRadius = radius  * (1  +  hillparam)
-$$
 
-Since the Programmable Block API always gives us the local gravity value, it is possible to sample the gravity at two different altitudes and compute the radius. We need to solve the equation for the unknown radius:
+- $MaxRadius = radius  * (1  +  hillparam)$
 
- $grav * (radius+alt)^2 = grav_{prev} * (radius+alt_{prev})^2$ 
+- $EXP = 2$ when using the Real Orbit mod
+
+Since the Programmable Block API always gives us the local gravity value, it is possible to sample the gravity at two different altitudes and compute the radius. Given that MaxRadius is a constant for one planet, we need to solve the equation for the unknown radius:
+
+ $grav * (alt+radius)^{EXP} = grav_{prev} * (alt_{prev}+radius)^{EXP}$ 
+
+### 6.2.2 Solving with quadratic formula
+
+For the case EXP = 2 we can use the usual quadratic formula :
 
 Rearranging the terms for the usual form
 
@@ -261,10 +271,46 @@ $radius = \frac{-B + \sqrt{delta}}{2*A}$
 
 At each call, use the new updated values for the computations and then push them to the old values for the next update
 
+### 6.2.3 Solving for the general case
+
+For vanilla Space Engineers, EXP = 7, so we need another formula. Unlike simple quadratics there a re not general 7th degree solutions fortunately our equation is very simple. We start from:
+
+$$
+\text{grav} \cdot (alt + radius)^{EXP} = \text{grav}_{prev} \cdot (alt_{prev} + radius)^{EXP}
+$$
+
+Rearrange :
+
+$$
+\left( \frac{alt + radius}{alt_{prev} + radius} \right)^{EXP} = \frac{\text{grav}_{prev}}{\text{grav}}
+$$
+
+Now take the $EXP$-th root of both sides:
+
+$$
+\frac{alt + radius}{alt_{prev} + radius} = \left( \frac{\text{grav}_{prev}}{\text{grav}} \right)^{1/EXP}
+$$
+
+Let:
+
+$$
+K = \left( \frac{\text{grav}_{prev}}{\text{grav}} \right)^{1/EXP}
+$$
+
+This gives use:
+
+$$
+radius = \frac{K \cdot alt_{prev} - alt}{1 - K}
+$$
+
+This works for any exponent $EXP \ne 1$, as long as the denominator is not zero (the current and previous gravity value must be different).
+
+### 6.2.4 Final solving
+
 Once we have the radius, the seal level gravity is computed as follows:
 
 $$
-grav_{sealevel} = grav(alt_{sealevel}) * {(\frac{alt_{sealevel}+radius}{radius*(1+hillparam)})}^2
+grav_{sealevel} = grav(alt_{ASL}) * {(\frac{alt_{ASL}+radius}{radius*(1+hillparam)})}^2
 $$
 
 ## 6.3 Final selection
@@ -431,76 +477,148 @@ foreach (var thr in thrusters) {
     else if (name.Contains("Atmo")) athrusters.Add(thr);
 }
 ```
+
 # 12 Misc classes
 
-# 12.2 Data logger
+## 12.2 Data logger
 
 The `Logger` class provides the capability to record internal variables of the script over time, and output them in CSV format into the Programmable Block custom data. They can be graphed with Excel, Matlab etc. for analysis.
 
-# 12.3. Runtime counter
+## 12.3. Runtime counter
+
+Class used to time the execution of the script and provide statistics for each of the main tasks (the tick1, tick10 and tick100 ones)
+
+## 12.4 Helpers
 
 TODO
 
-# 12.4 Helpers
+## 12.5 PID
 
 TODO
 
-# 12.5 PID
+## 12.6 Ship information
 
 TODO
 
-# 12.6 Ship information
+# 13 Hover Mode (mode 3)
 
-TODO
+The safe speed computation follows an affine law based on the altitude above ground.
+```
+	public readonly double safeSpeedAltMin = 10;
+	public readonly double safeSpeedAltMax = 400;
+	public readonly double safeSpeedMin = 3;
+	public readonly double safeSpeedMax = 200;
+```
+# 14 Autopilot (mode 4)
+
+## 14.1 Speed and altitude set point management
+
+The forward speed and altitude set points use a moving average filter to limit the upset of the PID controller when the user increments or decrements by 10 m/s or 10 m respectively.
+
+## 14.2 Altitude hold algorithm
+
+When the altitude set point is relative to sea level, the autopilot prioritizes the speed set-point. That means that if the ground slopes up (mountain etc.) it will rise above the set-point in order to maintain the forward speed.
+
+If a camera (SLMradar) is present, the script scans forward of the ship, with an angle of 40°, to anticipate ground sloping up before the ship get above it.
 
 # Appendix A. Planet Catalog
 
 The default planet (unknown) is defined here as having a thick atmosphere to lower ion effectiveness but because it is unknown then the script will also completely ignore atmospheric thrusters capability.
 For the generic atmo planet we assume a moderately dense atmosphere but that doesn't go as high as Earthlike.
 
+shortname is what the command given to the PB must include, while name is the nicer name displayed on the LCD.
+
 The planet catalog is as follows :
 
-The following are the vanilla planets of space engineers. Values are read directly from the .sbc files (PlanetGeneratorDefinitions.sbc or Pertam.sbc or Triton.sbc)
-
-| Shortname  | Name                          | Atmo Density (Sea Level) | Atmo Limit Altitude | Hill Parameter | Gravity (Sea Level) | Ignore Atmo | Identified |
-|------------|--------------------------------|--------------------------|---------------------|----------------|----------------------|-------------|------------|
-| unknown    | Unknown Planet                 | 1                        | 2                   | 0.1            | 1                    | ✅          | ❌         |
-| vacuum     | Generic Vacuum Planet          | 0                        | 0                   | 0.1            | 1                    | ❌          | ❌         |
-| atmo       | Generic Atmo Planet            | 0.8                      | 1                   | 0.05           | 1                    | ❌          | ❌         |
-| pertam     | Pertam                          | 1                        | 2                   | 0.025          | 1.2                  | ❌          | ✅         |
-| triton     | Triton                          | 1                        | 0.47                | 0.20           | 1                    | ❌          | ✅         |
-| earth      | Earthlike                       | 1                        | 2                   | 0.12           | 1                    | ❌          | ✅         |
-| alien      | Alien                           | 1.2                      | 2                   | 0.12           | 1.1                  | ❌          | ✅         |
-| mars       | Mars (vanilla)                  | 1                        | 2                   | 0.12           | 0.9                  | ❌          | ✅         |
-| moon       | Moon (vanilla)                  | 0                        | 1                   | 0.03           | 0.25                 | ❌          | ✅         |
-| europa     | Europa                          | 0.5                      | 1                   | 0.06           | 0.25                 | ❌          | ✅         |
-| titan      | Titan                           | 0.5                      | 1                   | 0.03           | 0.25                 | ❌          | ✅         |
-
-
-Below are additional planets from mods or custom planets that I like a lot
-
-| Shortname  | Name                          | Atmo Density (Sea Level) | Atmo Limit Altitude | Hill Parameter | Gravity (Sea Level) | Ignore Atmo | Identified |
-|------------|--------------------------------|--------------------------|---------------------|----------------|----------------------|-------------|------------|
-| komorebi   | Komorebi                        | 1.12                     | 2.4                 | 0.032          | 1.14                 | ❌          | ✅         |
-| orlunda    | Orlunda                         | 0.89                     | 6                   | 0.01           | 1.12                 | ❌          | ✅         |
-| trelan     | Trelan                          | 1                        | 1.2                 | 0.1285         | 0.92                 | ❌          | ✅         |
-| teal       | Teal                            | 1                        | 2                   | 0.02           | 1                    | ❌          | ✅         |
-| kimi       | Kimi                            | 0                        | 1                   | 0              | 0.05                 | ❌          | ✅         |
-| qun        | Qun                             | 0                        | 1                   | 0.25           | 0.42                 | ❌          | ✅         |
-| tohil      | Tohil                           | 0.5                      | 1                   | 0.03           | 0.328                | ❌          | ✅         |
-| satreus    | Satreus                         | 0.9                      | 1.5                 | 0.04           | 0.95                 | ❌          | ✅         |
-| pyke       | Pyke                            | 1.5                      | 2                   | 0.06           | 1.42                 | ❌          | ✅         |
-| saprimentas| Saprimentas                     | 1.5                      | 2                   | 0.07           | 0.96                 | ❌          | ✅         |
-| aulden     | Aulden                          | 1.2                      | 2                   | 0.10           | 0.82                 | ❌          | ✅         |
-| silona     | Silona                          | 0.85                     | 2                   | 0.03           | 0.64                 | ❌          | ✅         |
-| argus      | Argus                           | 0.79                     | 2                   | 0.01           | 1.45                 | ❌          | ✅         |
-| aridus     | Aridus                          | 1.3                      | 1                   | 0.1            | 0.5                  | ❌          | ✅         |
-| microtech  | Microtech                       | 1                        | 0.5                 | 0.25           | 1                    | ❌          | ✅         |
-| hurston    | Hurston                         | 1                        | 1.9                 | 0.11           | 1.1                  | ❌          | ✅         |
-| terra      | (Terra) Earth by Infinite       | 2                        | 0.9                 | 0.02           | 1                    | ❌          | ✅         |
-| luna       | Luna by Infinite                | 0                        | 1                   | 0.07           | 0.16                 | ❌          | ✅         |
-| sspmar     | Mars by Infinite                | 0.006                    | 2                   | 0.09           | 0.38                 | ❌          | ✅         |
-| venus      | Venus by Infinite               | 92                       | 2                   | 0.04           | 0.9                  | ❌          | ✅         |
-| mercury    | Mercury by Infinite             | 0                        | 1                   | 0.1            | 0.37                 | ❌          | ✅         |
-| ceres      | Ceres by Infinite               | 0                        | 0.5                 | 0.1            | 0.05                 | ❌          | ✅         |
-| helghan    | Helghan                         | 1.2                      | 3.5                 | 0.01           | 1.1                  | ❌          | ✅         |
+| Shortname    | Name                     | Atmo Density (Sea Level) | Atmo Limit Altitude | HillParam | g (Sea Level) | Author                |
+|--------------|-------------------------|--------------------------|---------------------|-----------|---------------|-----------------------|
+| unknown      | Unknown Planet          | 1                        | 2                   | 0.1       | 1             | Deduced/Generic        |
+| dynvacuum    | Deduced Vacuum Planet   | 0                        | 0                   | 0.1       | 1             | Deduced/Generic        |
+| dynatmo      | Deduced Atmo Planet     | 0.8                      | 1                   | 0.05      | 1             | Deduced/Generic        |
+| vacuum       | Generic Vacuum Planet   | 0                        | 0                   | 0.1       | 1             | Deduced/Generic        |
+| atmo         | Generic Atmo Planet     | 0.8                      | 1                   | 0.05      | 1             | Deduced/Generic        |
+| pertam       | Pertam                  | 1                        | 2                   | 0.025     | 1.2           | Vanilla                |
+| triton       | Triton                  | 1                        | 0.47                | 0.20      | 1             | Vanilla                |
+| earth        | Earthlike               | 1                        | 2                   | 0.12      | 1             | Vanilla                |
+| alien        | Alien                   | 1.2                      | 2                   | 0.12      | 1.1           | Vanilla                |
+| mars         | Mars (vanilla)          | 1                        | 2                   | 0.12      | 0.9           | Vanilla                |
+| moon         | Moon (vanilla)          | 0                        | 1                   | 0.03      | 0.25          | Vanilla                |
+| europa       | Europa                  | 0.5                      | 1                   | 0.06      | 0.25          | Vanilla                |
+| titan        | Titan                   | 0.5                      | 1                   | 0.03      | 0.25          | Vanilla                |
+| komorebi     | Komorebi                | 1.12                     | 2.4                 | 0.032     | 1.14          | Major Jon              |
+| orlunda      | Orlunda                 | 0.89                     | 6                   | 0.01      | 1.12          | Major Jon              |
+| trelan       | Trelan                  | 1                        | 1.2                 | 0.1285    | 0.92          | Major Jon              |
+| teal         | Teal                    | 1                        | 2                   | 0.02      | 1             | Major Jon              |
+| kimi         | Kimi                    | 0                        | 1                   | 0         | 0.05          | Major Jon              |
+| qun          | Qun                     | 0                        | 1                   | 0.25      | 0.42          | Major Jon              |
+| tohil        | Tohil                   | 0.5                      | 1                   | 0.03      | 0.328         | Major Jon              |
+| satreus      | Satreus                 | 0.9                      | 1.5                 | 0.04      | 0.95          | Major Jon              |
+| kor          | Kor                    | 0                        | 0                   | 0.03      | 0.74          | Major Jon              |
+| pyke         | Pyke                    | 1.5                      | 2                   | 0.06      | 1.42          | Elindis               |
+| saprimentas  | Saprimentas             | 1.5                      | 2                   | 0.07      | 0.96          | Elindis               |
+| aulden       | Aulden                  | 1.2                      | 2                   | 0.10      | 0.82          | Elindis               |
+| silona       | Silona                  | 0.85                     | 2                   | 0.03      | 0.64          | Elindis               |
+| argus        | Argus                   | 0.79                     | 2                   | 0.01      | 1.45          | Infinite              |
+| aridus       | Aridus                  | 1.3                      | 1                   | 0.1       | 0.5           | Infinite              |
+| microtech    | Microtech               | 1                        | 0.5                 | 0.25      | 1             | Infinite              |
+| hurston      | Hurston                 | 1                        | 1.9                 | 0.11      | 1.1           | Infinite              |
+| ignis        | Ignis                   | 0.85                     | 3                   | 0.005     | 1.08          | Infinite              |
+| tharsis      | Tharsis                 | 0.85                     | 3                   | 0.015     | 0.75          | Infinite              |
+| umbris       | Umbris                  | 0                        | 0                   | 0.05      | 0.19          | Infinite              |
+| valkor       | Valkor                  | 1                        | 0.3                 | 0.165     | 1.05          | Infinite              |
+| theros       | Theros                  | 1                        | 0.73                | 0.1       | 0.95          | Infinite              |
+| thanatos     | Thanatos                | 1.5                      | 2.8                 | 0.04      | 1.4           | Infinite              |
+| halcyon      | Halcyon                 | 0.85                     | 1.3                 | 0.3       | 0.5           | Infinite              |
+| terra        | (Terra) Earth by Infinite | 2                        | 0.9                 | 0.02      | 1             | Infinite (Solar System Pack) |
+| luna         | Luna by Infinite        | 0                        | 1                   | 0.07      | 0.16          | Infinite (Solar System Pack) |
+| sspmars      | Mars by Infinite        | 0.006                    | 2                   | 0.09      | 0.38          | Infinite (Solar System Pack) |
+| venus        | Venus by Infinite       | 92                       | 2                   | 0.04      | 0.9           | Infinite (Solar System Pack) |
+| mercury      | Mercury by Infinite     | 0                        | 1                   | 0.1       | 0.37          | Infinite (Solar System Pack) |
+| ceres        | Ceres by Infinite       | 0                        | 0.5                 | 0.1       | 0.05          | Infinite (Solar System Pack) |
+| deimos       | Deimos by Infinite      | 0                        | 0                   | 0.8       | 0.05          | Infinite (Solar System Pack) |
+| phobos       | Phobos by Infinite      | 0                        | 0                   | 1         | 0.05          | Infinite (Solar System Pack) |
+| callisto     | Callisto by Infinite    | 0                        | 0.5                 | 0.04      | 0.12          | Infinite (Solar System Pack) |
+| europa       | Europa by Infinite      | 0                        | 0.5                 | 0.04      | 0.13          | Infinite (Solar System Pack) |
+| ganymede     | Ganymede by Infinite    | 0                        | 0                   | 0.04      | 0.14          | Infinite (Solar System Pack) |
+| io           | Io by Infinite          | 0                        | 0                   | 0.025     | 0.18          | Infinite (Solar System Pack) |
+| dione        | Dione by Infinite       | 0                        | 0.5                 | 0.06      | 0.05          | Infinite (Solar System Pack) |
+| enceladus    | Enceladus by Infinite   | 0                        | 0.5                 | 0.02      | 0.05          | Infinite (Solar System Pack) |
+| iapetus      | Iapetus by Infinite     | 0                        | 0                   | 0.03      | 0.05          | Infinite (Solar System Pack) |
+| mimas        | Mimas by Infinite       | 0                        | 0.5                 | 0.07      | 0.05          | Infinite (Solar System Pack) |
+| rhea         | Rhea by Infinite        | 0                        | 0                   | 0.06      | 0.05          | Infinite (Solar System Pack) |
+| thetys       | Thetys by Infinite      | 0                        | 0.5                 | 0.09      | 0.05          | Infinite (Solar System Pack) |
+| titan        | Titan by Infinite       | 1.5                      | 3                   | 0.01      | 0.14          | Infinite (Solar System Pack) |
+| ariel        | Ariel by Infinite       | 0                        | 0.5                 | 0.03      | 0.05          | Infinite (Solar System Pack) |
+| charon       | Charon by Infinite      | 0                        | 0.5                 | 0.03      | 0.05          | Infinite (Solar System Pack) |
+| miranda      | Miranda by Infinite     | 0                        | 0.5                 | 0.05      | 0.08          | Infinite (Solar System Pack) |
+| oberon       | Oberon by Infinite      | 0                        | 0.5                 | 0.03      | 0.05          | Infinite (Solar System Pack) |
+| pluto        | Pluto by Infinite       | 0.00001                  | 0                   | 0.03      | 0.06          | Infinite (Solar System Pack) |
+| titania      | Titania by Infinite     | 0                        | 0.5                 | 0.03      | 0.05          | Infinite (Solar System Pack) |
+| triton       | Triton by Infinite      | 0                        | 0.5                 | 0.03      | 0.07          | Infinite (Solar System Pack) |
+| umbriel      | Umbriel by Infinite     | 0                        | 0.5                 | 0.03      | 0.05          | Infinite (Solar System Pack) |
+| acheris      | Acheris                 | 1.5                      | 2                   | 0.0003    | 1.36          | Infinite (Mirathi System) |
+| ares         | Ares                    | 0.85                     | 3                   | 0.025     | 0.53          | Infinite (Mirathi System) |
+| euterpe      | Euterpe                 | 0.1                      | 2                   | 0.025     | 0.19          | Infinite (Mirathi System) |
+| gaia         | Gaia                    | 1                        | 3                   | 0.03      | 0.97          | Infinite (Mirathi System) |
+| nyxion       | Nyxion                  | 0                        | 0                   | 0.095     | 0.22          | Infinite (Mirathi System) |
+| tartarus     | Tartarus                | 1.1                      | 1.5                 | 0.08      | 1.13          | Infinite (Mirathi System) |
+| tarvos       | Tarvos                  | 0.85                     | 3                   | 0.03      | 0.75          | Infinite (Mirathi System) |
+| vulcanis     | Vulcanis                | 0.85                     | 3                   | 0.065     | 0.9           | Infinite (Mirathi System) |
+| zephyr       | Zephyr                  | 10                       | 3                   | 0.01      | 3.24          | Infinite (Mirathi System) |
+| calliope     | Calliope                | 1                        | 3                   | 0.03      | 0.92          | Infinite (Mirathi System) |
+| calypso      | Calypso                 | 0.2                      | 3                   | 0.03      | 0.63          | Infinite (Mirathi System) |
+| cryos        | Cryos                   | 0.1                      | 2                   | 0.065     | 0.09          | Infinite (Mirathi System) |
+| erebus       | Erebus                  | 0                        | 0                   | 0.028     | 0.32          | Infinite (Mirathi System) |
+| helghan      | Helghan                 | 1.2                      | 3.5                 | 0.01      | 1.1           | Almirante Orlock      |
+| arcadia      | Arcadia                 | 1                        | 2                   | 0.04      | 1.17          | Fizzy                  |
+| sarilla      | Sarilla                 | 0                        | 0                   | 0.14      | 0.74          | Fizzy                  |
+| anteros      | Anteros                 | 1.10                     | 1.69                | 0.07      | 1.32          | Fizzy                  |
+| chimera      | Chimera                 | 1.22                     | 1.5                 | 0.1       | 1             | Fizzy                  |
+| zira         | Zira                    | 0                        | 0                   | 0.14      | 0.16          | Fizzy                  |
+| celaeno      | Celaeno                 | 1.02                     | 6.5                 | 0.02      | 0.93          | Fizzy                  |
+| scylla       | Scylla                  | 0                        | 0                   | 0.01      | 0.32          | Fizzy                  |
+| dustydesert  | Dusty Desert Planet     | 1                        | 2                   | 0.12      | 1             | SlowpokeFarm           |
+| gamadon      | Gamadon                 | 0.8                      | 2                   | 0.15      | 0.72          | Urdavis System (sam)   |
+| kuma         | Kuma                    | 1                        | 0.5                 | 0.1       | 1             | Urdavis System (sam)   |
+| mieliv       | Mieliv                  | 1                        | 0.5                 | 0.1       | 1             | Urdavis System (sam)   |
+| sario        | Sario                   | 0                        | 0                   | 0.30      | 0.3           | Urdavis System (sam)   |
