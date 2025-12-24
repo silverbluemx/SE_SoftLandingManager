@@ -12,7 +12,8 @@ This heavily relies on the planet gravity extending away to a long distance from
 ### Designed for use with:
 - inverse square law gravity mods such as Real Orbits
 - high speed limit mods such as 1000 m/s speed mod
-If you're not using both of these, then the script won't work well but also is not really needed.
+
+The script also works if you're not using these (some configuration parameters should be changed to improve operation)
 - ships with not a lof of margin for vertical thrust (ex : lift to weight ratio of 1.5)
 
 ### Functions:
@@ -26,8 +27,9 @@ If you're not using both of these, then the script won't work well but also is n
 - warns if the ship is not capable of landing on the planet
 - automatically deploy parachutes if about to crash
 - (new in v2.1) lets you safety fly ships without any horizontal thruster (like helicopters) in mode3 (hover mode)
+- (new in v2.2) autodetect if using Real Orbits or playing vanilla space engineers (can be manually configured)
 - (beta feature in v2.1) autopilot with speed and altitude hold function
-
+- (beta feature in v2.2) space rendez-vous to an asteroid or stationary large grid in zero gravity
 
 ### Installation:
 - (optional but recommanded) install one or two downwards facing camera on your ship, with the proper tag in their names
@@ -35,9 +37,7 @@ If you're not using both of these, then the script won't work well but also is n
 - (optional) configure LCDs, timers, sound blocks etc. as needed, see below for the functions they provide
 - install the script in a programmable block
 - recompile the script to let it autoconfigure itself
-- (no longer needed with v2) ~~Install and configure on your ship an auto-levelling script such as flight assist or other~~
-
-IMPORTANT : To use vanilla gravity (if not using Real Orbits for example), you need to change the configuration : gravityExponent = 7; instead of gravityExponent = 2; in the SLMConfiguration class
+- (no longer needed with v2) ~~Install and configure on your ship an auto-levelling script such as flight assist or other~~ 
 
 ### Basic usage for landing (modes 1 and 2):
 - Move your ship to the edge of a planet gravity field
@@ -55,11 +55,18 @@ IMPORTANT : To use vanilla gravity (if not using Real Orbits for example), you n
 - The speed depends on altitude. Close to the ground, the safe speed is low, ideal to fine-tune landing on a connector. At higher altitudes, it lets you fly up to 200 m/s.
 
 ### Basic usage for autopilot mode (mode 4):
-- Activate mode3. By default it sets the target 50m above ground, with no horizontal speed.
+- Activate mode4. By default it sets the target 50m above ground (or the current altitude if you're already higher), with no horizontal speed.
 - Use the commands (see below) to increase/decrease the speed and altitude targets.
 - The forward/backward key can also be used to change the speed.
 - The script limits itself to a safe speed close to ground. When the speed setpoint blinks, the safe speed limit is in effect. Climb higher to fly faster.
-- Switch to sea-level reference to fly straight, or ground-level reference to follow terrain
+- Switch to sea-level reference to fly straight and smoothly, or ground-level reference to follow terrain (rougher and more dangerous)
+
+### Basic usage for space rendez-vous (mode 5):
+- Your ship must be outside of a planet gravity well (gravity = 0)
+- Orient your camera ("SLMradar") precisely towards an asteroid or stationary large grid that you want to rendezvous with. Distances up to 10km work reliably.
+- Activate mode 5. The ship will initalize the camera to measure distance, then pick up speed, then brake to stop close to the target.
+- You remain responsible for the size thrusters and keeping the camera pointed at the target.
+- It's also possible to pick up speed manually and then orient the camera and activate mode5 while on route.
 
 ### Command line arguments:
 
@@ -73,6 +80,7 @@ Basic commands
 	let the ship pick up speed, and then switch to mode1 to try and maintain that speed using ion thrusters
 - **mode3** : the script manages autoleveling (copy of Flight Assist "Hover Smart" mode) and lets you safety fly ships without any horizontal thruster (like helicopters) in mode3
 - **mode4** : (beta feature) autopilot with altitude hold (relative to ground or sea level) and speed hold
+- **mode5** : (beta feature) space rendez-vous to an asteroid or stationary large grid in zero gravity
 
 Advanced commands : planet surface conditions
 
@@ -117,7 +125,7 @@ Use the following names for your ship blocks. They may be changed in the script 
 
 *SLMignore* OPTIONAL : Include this tag in any block that you want this script to ignore. For example, thrusters on an auxiliary drone.
 
-*SLMdisplay* OPTIONAL : Main display for the script (there can be any number of them, or none at all)
+*SLMdisplay* OPTIONAL : Main display for the script (there can be any number of them, or none at all). To display in blocks with multiple displays (such as cockpits etc.) add the index of the screen. For example *SLMdisplay0* to display on screen n°0, *SLMdisplay1* to display on screen n°1, etc. 
 
 *SLMdebug* OPTIONAL : Additional debug display for the script (there can be any number of them, or none at all)
 
