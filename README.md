@@ -2,10 +2,12 @@
 
 ![Banner for the script](./img/SLM_v2.jpg)
 
-A script to automatically manage your thrusters to land safely on planets while optimizing your fuel and energy use. Also scans the terrain and guides the ship to a safe landing spot, avoiding obstacles and steep slopes.
+A script to automatically manage your thrusters to land safely on planets while optimizing your fuel and energy use. Also scans the terrain and guides the ship to a safe landing spot, avoiding obstacles and steep slopes. Alternatively, it can land precisely at a GPS location.
 
 It uses an acceleration model of the ship, with a planet gravity and atmosphere model (as used by the game, not real-life !), to compute the ideal landing profile (speed vs altitude).
 This heavily relies on the planet gravity extending away to a long distance from the surface and following an inverse square law, which is not what the game natively does, hence why the mod Real Orbit is required (and a speed mod to let the ship move faster than 100 m/s and make things even more interesting).
+
+This user manual is current for script version 2.3.
 
 ## Summary
 
@@ -26,18 +28,20 @@ The script also works if you're not using these (some configuration parameters s
 - provides an estimate of the surface gravity for the planet
 - warns if the ship is not capable of landing on the planet
 - automatically deploy parachutes if about to crash
-- (new in v2.1) lets you safety fly ships without any horizontal thruster (like helicopters) in mode3 (hover mode)
+- lets you safety fly ships without any horizontal thruster (like helicopters) in mode3 (hover mode)
 - (new in v2.2) autodetect if using Real Orbits or playing vanilla space engineers (can be manually configured)
-- (beta feature in v2.1) autopilot with speed and altitude hold function
+- (new in v2.3) land acurrately to a GPS location on the ground
+- autopilot with speed and altitude hold function
 - (beta feature in v2.2) space rendez-vous to an asteroid or stationary large grid in zero gravity
 
 ### Installation:
 - (optional but recommanded) install one or two downwards facing camera on your ship, with the proper tag in their names
 - (optional but recommanded) configure the names of the ship controller (cockpit, helm etc.)
 - (optional) configure LCDs, timers, sound blocks etc. as needed, see below for the functions they provide
+- (optional) install side cameras for improved guidance
 - install the script in a programmable block
 - recompile the script to let it autoconfigure itself
-- (no longer needed with v2) ~~Install and configure on your ship an auto-levelling script such as flight assist or other~~ 
+
 
 ### Basic usage for landing (modes 1 and 2):
 - Move your ship to the edge of a planet gravity field
@@ -45,6 +49,8 @@ The script also works if you're not using these (some configuration parameters s
 - (optionnally) Set vacuum or atmosphere mode, or select a planet to optimize the descent profile
 - Steer your ship to land on flat ground or let it manage it automatically (you can provide inputs at any time that will override automatic horizontal guidance)
 - Once landed, check if the script automatically switched to mode0 (off), if not then turn it off yourself
+
+To land at a precise GPS location, copy the GPS location from the game menu, and paste it in the programmable block Custom Data. Then, activate GPS guidance (script command : **GPSon**). The purpose is to allow precise landing, not fly to a remote location, so you should be mostly above the target for it to work.
 
 ### Basic usage for hover mode (mode 3):
 - Activate mode3. The script turns inertia dampers on and levels the ship.
@@ -68,6 +74,12 @@ The script also works if you're not using these (some configuration parameters s
 - You remain responsible for the size thrusters and keeping the camera pointed at the target.
 - It's also possible to pick up speed manually and then orient the camera and activate mode5 while on route.
 
+### Basic usage for space rendez-vous (mode 6):
+- Your ship must be landed at the surface, or close to the surface
+- Activate mode 6
+- The ship will take off and climb vertically very quickly. It will get to the speed necessary to ballistically reach the edge of the gravity well (where there is no gravity)
+- As the distance to the planet increases, gravity decreases. When it reaches 0.05g, the game then goes in zero-gravity mode. The script turns the inertial dampeners and stops the ship
+
 ### Command line arguments:
 
 Basic commands
@@ -79,8 +91,9 @@ Basic commands
 	It is possible to switch between mode1 and mode2 during the descent, for example use mode2 to
 	let the ship pick up speed, and then switch to mode1 to try and maintain that speed using ion thrusters
 - **mode3** : the script manages autoleveling (copy of Flight Assist "Hover Smart" mode) and lets you safety fly ships without any horizontal thruster (like helicopters) in mode3
-- **mode4** : (beta feature) autopilot with altitude hold (relative to ground or sea level) and speed hold
+- **mode4** : autopilot with altitude hold (relative to ground or sea level) and speed hold
 - **mode5** : (beta feature) space rendez-vous to an asteroid or stationary large grid in zero gravity
+- **mode6** : take-off from the surface and reach the end of the gravity field
 
 Advanced commands : planet surface conditions
 
@@ -107,6 +120,9 @@ Advanced commands for mode 4 autopilot (beta feature)
 - **altgnd** : set the altitude target related to ground level
 - **altsl** : set the altitude target related to sea level
 - **altswitch** : switch between ground and sea level reference (based on the actual altitude that the ship is at)
+- **gpson** : activate GPS guidance (need GPS coordinates recorded in the Programmable Block Custom Data)
+- **gpsoff** : turn off GPS guidance
+- **gpsswitch** : turn on/off GPS guidance
 
 All commands can be combined, ex : **mode1mars**, **mode2atmo**, **mode1angleoffthrusterson** etc.
 
@@ -120,8 +136,14 @@ Use the following names for your ship blocks. They may be changed in the script 
 
 *SLMradar* OPTIONAL BUT RECOMMANDED : Name of downward-facing camera used as a ground radar (to measure altitude from very long distance and also account for landing pads above or below a planet surface). It is recommanded to have two of them and they need to have unobstructed view below the ship with a wide angle of view (there must be no ship parts in a cone of 45° angle starting at the camera)
 
+*SLMterrainradar* OPTIONAL BUT RECOMMANDED : Name one camera that way to force the script to use it for terrain (otherwise it picks one of those named *SLMradar*)
+
 ![Illustration 1 of radar placement constraint](./img/IMG16.jpg)
 ![lllustration 2 of radar placement constraint](./img/IMG17.jpg)
+
+*SLMsidecam* : OPTIONAL : Cameras on the side of your ship (forward, left, rear, right) to improve obstacle detection. Orientation must be such that the "up" view of the camera corresponds to "up" for the ship. The script checks the orientation when compiling
+
+![lllustration of side camera](./img/IMG21.jpg)
 
 *SLMignore* OPTIONAL : Include this tag in any block that you want this script to ignore. For example, thrusters on an auxiliary drone.
 
@@ -139,7 +161,19 @@ Use the following names for your ship blocks. They may be changed in the script 
 
 *SLMsound* OPTIONAL : Sound block used to warn if expected surface gravity is higher than what the ship can handle or the ship is in panic mode (incapable of slowing down enough)
 
+*SLMconnector* OPTIONAL : Name one connector like this so that GPS guidance use it as a position reference (for example, to land precisely on a connector on the ground, even if your ship does not have its connector in the middle)
+
 ### Script configuration
+
+By default the script considers that the 1000m/s speed mod and Real Orbit mod are both active. To use the script with Vanilla Space engineers, change the `SEGameConfig` configuration in the code like this :
+
+	MaxSpeed = 100;
+	GravExp = 7;
+
+Instead of :
+
+	MaxSpeed = 1000;
+	GravExp = 2;
 
 Speed limits, thrust-to-weight ratio margins, PID controller coefficients, timer trigger altitude etc. can be changed in the `SLMConfiguration` class (see code and [technical documentation](technical.md)).
 
@@ -169,6 +203,10 @@ The header shows the name of the script and planet parameters currently used. It
 - generic atmospheric or generic vacuum
 - the precise name of a planet that you selected in the catalog
 
+It also shows the gravity coefficient used:
+- g=2 with the Real Orbit mod (default)
+- g=7 for Vanilla SE (see above how to configure it)
+
 #### 2 : Vertical thrust and planet atmosphere and gravity indicator
 
 This combines several pieces of information on a vertical scale representing vertical acceleration
@@ -178,6 +216,8 @@ From left to right, it shows:
 - a wide bar that shows the thrust that the ship is currently applying (visible in the image below), color-coded by thruster type : green for atmospheric, blue for ion, red for hydrogen
 - a thin bar that shows the maximum thrust that the ship is capable of applying right now (for ion and atmospheric, it depends on the atmosphere density around the ship)
 - a representation of that ship capability for all possible atmospheric densities, from pure vacuum on the left to 100% atmospheric pressure on the right, with the same color coding
+
+A small tick at the bottom shows the current detected atmosphere density arround the ship.
 
 When the script manages landing, it shows also a white dot :
 - the vertical position of the dot corresponds to the estimation of the planet surface gravity (the exact value is written above)
@@ -228,14 +268,16 @@ This shows you two lines of information:
 
 Possible states for the source are :
 - **Profile** : this is the most accurate
-- **Alt/grav** : an approximation using only altitude and gravity. It's only used when the profile is not computed yet or cannot be computed (usually a bad sign)
-- **Gravity** : a temporary formula used until the altitude is known
-- **Final** : constant speed for the final few meters above ground
+- **Alt/grav** : (mode 1 or 2) an approximation using only altitude and gravity. It's only used when the profile is not computed yet or cannot be computed (usually a bad sign)
+- **Gravity** : (mode 1 or 2) a temporary formula used until the altitude is known
+- **Final** : (mode 1 or 2) constant speed for the final few meters above ground
 - **Disabled** : landing management is not active
+- **Unable** : the ship cannot land safely on the planet based on detected parameters
+- **Hold** : (mode 4) for altitude hold with the autopilot 
+- **Rendezvous** : (mode 5) when performing rendez-vous with an asteroid in zero gravity 
+- **Escape** : (mode 6) reaching the edge of the gravity well as fast and economically as possible 
 
 Typically, as the script starts up and initializes, you'll see this sequence : **Disabled** > **Gravity** > **Alt/grav** > **Profile** > **Final**.
-
-In the autopilot mode (mode 4), the state is **Alt Hold**.
 
 #### 5 : Horizontal mode indication with horizontal speed visualisation
 
@@ -250,6 +292,9 @@ For terrain scanning and slope avoidance, the state can be :
 - **Standby (D)** : the ship has two radars, the altitude is still to high to scan the terrain
 - **Early avoidance** : with two radars, a simple scanning patters can be started early, high above ground
 - **Wide avoidance** : with two radars and close to the ground, a more elaborate scanning pattern is active
+- **Hover** : (mode 3) horizontal speed is controlled with the keyboard
+- **Speed Hold** : (mode 4) speed from the autopilot
+- **GPS** : (mode 1 or 2) guiding to a GPS location. Its name and horizontal distance is also shown
 
 If the ship has a single radar, you'll see the sequence : **No avoidance** > **Standby (S)** > **Simple avoidance**.
 
@@ -275,11 +320,30 @@ In both mode 3 and mode 4, the exact value of the speed target is shown in cyan 
 
 ![Constitution of the main display](./img/IMG20.jpg)
 
+## How to use GPS guidance
+Step 1 : copy the GPS coordinates from the game GPS menu:
+
+![GPS step 1](./img/IMG22.jpg)
+
+Step 2 : open the programmable block (where SLM is installed) Custom Data
+
+![GPS step 2](./img/IMG23.jpg)
+
+Step 3 : paste the target GPS coordinates
+
+![GPS step 4](./img/IMG24.jpg)
+
+Step 4 : activate GPS guidance with *gpson* (to turn it on) or *gpsswitch* to switch it on/off. Note that it will only be activated when you separately activate mode 1 and 2, and the script must have already detected the ship altitude before it starts moving to the GPS location
+
+![GPS step 5](./img/IMG25.jpg)
+
 ## FAQ/Troubleshooting
 
 #### Does it really need Real Orbits and a speed mod ?
-If you don't use these, the game is much easier and you probably don't really need the script. That said, yes, it works. To use vanilla gravity, you need to change the configuration :
-`gravityExponent = 7;` instead of `gravityExponent = 2;` in the `SLMConfiguration` class
+If you don't use these, the game is much easier and you probably don't really need the script. That said, yes, it works. To use the script with Vanilla Space engineers, change the `SEGameConfig` configuration in the code like this :
+
+	MaxSpeed = 100;
+	GravExp = 7;
 
 #### I have an issue and want to ask for help
 Sure, but please help me help you. Give details to what is wrong, when it happens. Tell me or show screenshots of how your ship is set up, what the script says (in the menu for the programmable block, see below) when you compile it, what is shown on the main displays (LCD named "SLMdisplay") etc.
@@ -303,7 +367,9 @@ Yes, it's recomputed in real time as the script updates its estimate of the plan
 Tweak the `altitudeOffset` configuration parameter so that the ship reads less than 2m altitude when you've landed. Alternatively, have a landing gear/magnetic plate on autolock, and the script will turn off when it locks.
 
 #### The ship slammed into a mounted/got stuck into a canyon/landed crooked etc. despite the terrain avoidance feature
-Yes, it's far from perfect because of the limitations in camera raycast details and update rate. There is also a lot of tweaking/tuning remaining to be done so that it works well for all ship shapes and sizes. Remember that you are still in control of the ship and can orient the ship and apply horizontal thrusters yourself even when the script is running in terrain avoidance mode. It will let you have authority as long a you provide inputs, and takes over again after a few seconds.
+The function does its best but not bulletproof considering the limitations in the camera raycast rates. Also, the ship design can help :
+- add side cameras (*SLMsidecam*) in addition to the bottom cameras (*SLMradar*)
+- make sure that side thrusters are powerfull enough to guide the ship
 
 #### It barely tilts/tilts dangerously the ship for horizontal guidance
 The script estimates the safe tilt angle based on the ship rotational inertia and the number of gyroscopes. I still need to find the ideal settings. At the moment, it's probably too much on the safe side !
@@ -315,10 +381,13 @@ It's possible to disable it using the command arguments (see above) but to be le
 Yes, the autopilot (mode 4) is a beta feature. More work remains on this one. That said constructive feedback will be appreciated.
 
 #### The script makes the game lag
-Yes, I've noticed some spikes in the script execution time (>1ms) for the terrain scanning function. It's under investigation.
+Yes, I've noticed some spikes in the script execution time (>1ms) for the terrain scanning function. I've spread some of the raycasts across different ticks to help a little.
 
 #### The script went in panic mode but did not deploy parachutes and my ship crashed !
 Look at the parachutes block, it's probably in the "deploy" state but didn't deploy. Check if they have canvas in them. I've sometimes found the parachute blocks unreliable in SE (they don't detect the atmosphere and don't open).
+
+#### GPS guidance does not activate ####
+The purpose is to guide the descent to allow precise landing on a predefined spot, not fly to a remote location, so you should be mostly above the target for it to work. The script will accept activation of GPS guidance if the horizontal distance to the target is not further than the current altitude, for a roughtly 45° landing trajectory. The message "GPS disabled" appears on the screen when that occurs.
 
 #### How to add more planets to the catalog ?
 Modded planets can be added to the `PlanetCatalog` class (see code and [technical documentation](technical.md)).
