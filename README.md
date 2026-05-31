@@ -71,7 +71,7 @@ To land at a precise GPS location, copy the GPS location from the game menu, and
 - Your ship must be outside of a planet gravity well (gravity = 0)
 - Orient your camera ("SLMradar") precisely towards an asteroid or stationary large grid that you want to rendezvous with. Distances up to 10km work reliably.
 - Activate mode 5. The ship will initalize the camera to measure distance, then pick up speed, then brake to stop close to the target.
-- You remain responsible for the size thrusters and keeping the camera pointed at the target.
+- You remain responsible for the side thrusters and keeping the camera pointed at the target.
 - It's also possible to pick up speed manually and then orient the camera and activate mode5 while on route.
 
 ### Basic usage for space rendez-vous (mode 6):
@@ -104,7 +104,7 @@ Advanced commands : planet surface conditions
 
 Advanced commands : guidance during descent for terrain avoidance
 
-- **angleoff**, **angleon** and **angleswitch** configure whether terrain avoidance will tilt the ship to manage horizontal speed or not
+- **angleoff**, **angleon** and **angleswitch** configure whether or not the terrain avoidance function and GPS guidance will tilt the ship to manage horizontal speed
 - **thrustersoff**, **thrusterson** and **thrustersswitch** same for the forward/back/left/right thrusters
 
 Advanced commands : other
@@ -136,7 +136,7 @@ Use the following names for your ship blocks. They may be changed in the script 
 
 *SLMradar* OPTIONAL BUT RECOMMANDED : Name of downward-facing camera used as a ground radar (to measure altitude from very long distance and also account for landing pads above or below a planet surface). It is recommanded to have two of them and they need to have unobstructed view below the ship with a wide angle of view (there must be no ship parts in a cone of 45° angle starting at the camera)
 
-*SLMterrainradar* OPTIONAL BUT RECOMMANDED : Name one camera that way to force the script to use it for terrain (otherwise it picks one of those named *SLMradar*)
+*SLMterrainradar* OPTIONAL BUT RECOMMANDED : Name one camera that way to force the script to use it for terrain (otherwise it picks one of those named *SLMradar*). If you have a *SLMterrainradar*, then the other camera can be named *SLMradar* and only needs to have a clear view directly in front of it.
 
 ![Illustration 1 of radar placement constraint](./img/IMG16.jpg)
 ![lllustration 2 of radar placement constraint](./img/IMG17.jpg)
@@ -329,7 +329,7 @@ Step 2 : open the programmable block (where SLM is installed) Custom Data
 
 ![GPS step 2](./img/IMG23.jpg)
 
-Step 3 : paste the target GPS coordinates
+Step 3 : paste the target GPS coordinates. There should be nothing else in this field.
 
 ![GPS step 4](./img/IMG24.jpg)
 
@@ -358,7 +358,7 @@ The script manages orientation based the ship controller it is using. Look at wh
 
 #### The script does not detect/use the thrusters correctly
 The script detects and uses thrusters relative to the orientation of the ship controller. See above.
-Use the programmable block display (as shown above) to see what thrusters are detected (Ion, Atmo, Hydro) for each direction. Thrusters used to go "up" are called "lifters" here.
+Use the programmable block display (as shown above) to see what thrusters are detected (Ion, Atmo, Hydro) for each direction. Thrusters used to go "up" are called "lifters" here. Add the tag *SLMignore* to any thruster that you want ignored (ex : on a drone or custom missile)
 
 #### The landing profile keeps changing, the landing burn is not smooth
 Yes, it's recomputed in real time as the script updates its estimate of the planet radius, surface gravity, and atmosphere condition. If you can select an exact planet in the catalog, it will be much more stable.
@@ -366,13 +366,14 @@ Yes, it's recomputed in real time as the script updates its estimate of the plan
 #### The script doesn't turn off after landing
 Tweak the `altitudeOffset` configuration parameter so that the ship reads less than 2m altitude when you've landed. Alternatively, have a landing gear/magnetic plate on autolock, and the script will turn off when it locks.
 
-#### The ship slammed into a mounted/got stuck into a canyon/landed crooked etc. despite the terrain avoidance feature
+#### The ship slammed into a mountain/got stuck into a canyon/landed crooked etc. despite the terrain avoidance feature
 The function does its best but not bulletproof considering the limitations in the camera raycast rates. Also, the ship design can help :
-- add side cameras (*SLMsidecam*) in addition to the bottom cameras (*SLMradar*)
+- add side cameras (*SLMsidecam*) in addition to the bottom cameras (*SLMradar*). One on each side is enough !
 - make sure that side thrusters are powerfull enough to guide the ship
 
 #### It barely tilts/tilts dangerously the ship for horizontal guidance
 The script estimates the safe tilt angle based on the ship rotational inertia and the number of gyroscopes. I still need to find the ideal settings. At the moment, it's probably too much on the safe side !
+Its possible to disable the gyroscopes using the **angleoff**, **angleon** and **angleswitch** commands, they configure whether or not the terrain avoidance function and GPS guidance will tilt the ship to manage horizontal speed
 
 #### I don't want the terrain avoidance function ! It was better before
 It's possible to disable it using the command arguments (see above) but to be less annoying, change both `terrainAvoidGyro = true;` and `terrainAvoidThrusters = true;` to `false` in the `SLMConfiguration` class, so that it starts disabled by default.
@@ -388,6 +389,13 @@ Look at the parachutes block, it's probably in the "deploy" state but didn't dep
 
 #### GPS guidance does not activate ####
 The purpose is to guide the descent to allow precise landing on a predefined spot, not fly to a remote location, so you should be mostly above the target for it to work. The script will accept activation of GPS guidance if the horizontal distance to the target is not further than the current altitude, for a roughtly 45° landing trajectory. The message "GPS disabled" appears on the screen when that occurs.
+In addition, the format of the GPS string copied to the programmable block Custom Data should be exactly the one copied from the GPS menu, with a format such as `GPS:PadA:-3735553.57:193346.14:-728224.97:#FF75C9F1:`
+
+#### GPS guidance deactivates on its own during descent ####
+If the vertical distance to the target is too much (more than the altitude), then GPS guidance disengages and the script reverts to terrain avoidance. The message "GPS disabled" appears on the screen when that occurs.
+
+#### I see a warning sign on the display (bottom right) ####
+It means the *SLMradar* or *SLMterrainradar* has an obstructed view (look at the above chapters)
 
 #### How to add more planets to the catalog ?
 Modded planets can be added to the `PlanetCatalog` class (see code and [technical documentation](technical.md)).
